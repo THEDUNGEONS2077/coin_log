@@ -341,3 +341,8 @@ Start from a copy of quest_log's infrastructure in a new repo, `~/projects/coin_
 - **Load salary prefills [P]:** DATE RECEIVED today (not later than today), SAVINGS R0, CREDIT the last salary's credit amount (empty before the first one), NEXT PAY DATE a month after the date received. Every prefill can be changed.
 - **The BUDGET tab [P]:** each line has a `≡` button for its menu (TOP UP, PAY, EDIT, CANCEL, as the line allows); holding the row opens the same menu. Food's `[+]` opens its top-up. Every gesture is also a screen-reader action.
 - **Forms preview their outcome [P]** by running the same rule the confirm button runs, so a refusal ("SPARE CREDIT WOULD BE SHORT BY R100") shows before confirming.
+- **Spare takes the rest [P]** (F2): ticking a budget line in fills in as much as it can take of what's still on spare (up to what's left on the line), and SPARE always covers whatever the lines don't. The parts therefore always add up, unless the lines take more than the amount, which is refused.
+- **Past cycles on LOG [P]** are folded under their dates (tap to open) and read-only; the current cycle is always open on top.
+- **SAVINGS history [P]** lists every entry that changed savings, across all cycles, showing what each did to savings. Rows from the current cycle can be changed or deleted, as on LOG.
+- **CHIPS [P]** (Settings): both label lists, each chip opening a page to rename or remove it, and "Add a label…". Logged entries keep their labels.
+- **A swipe is never also a tap [P]**: the release of a swipe on a row doesn't count as tapping it.

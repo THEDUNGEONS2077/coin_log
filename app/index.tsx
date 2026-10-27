@@ -21,7 +21,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useBooting } from '@/components/common/BootSequence';
 import { BottomBar } from '@/components/common/BottomBar';
-import { EmptyState } from '@/components/common/EmptyState';
 import { Header } from '@/components/common/Header';
 import { Phosphor } from '@/components/common/Phosphor';
 import { LitEdge } from '@/components/common/Rule';
@@ -30,6 +29,8 @@ import { TopStatus } from '@/components/common/TopStatus';
 import { Onboarding } from '@/components/common/useOnboarding';
 import { Setup } from '@/components/setup/Setup';
 import { BudgetList } from '@/components/budget/BudgetList';
+import { LogList } from '@/components/log/LogList';
+import { SavingsView } from '@/components/savings/SavingsView';
 import { Toast } from '@/components/overlays/Toast';
 import { useAppStore } from '@/store/react';
 import { colors, shape, size, space } from '@/theme';
@@ -65,10 +66,10 @@ export default function MainScreen() {
           <Tabs />
           <LitEdge at="bottom" />
         </View>
-        <View style={tab === 'budget' ? styles.list : [styles.list, { paddingBottom: barHeight }]}>
+        <View style={styles.list}>
           {tab === 'budget' && <BudgetList bottomInset={barHeight + space.lg} />}
-          {tab === 'log' && <EmptyState message="NOTHING LOGGED YET" />}
-          {tab === 'savings' && <EmptyState message="NO SAVINGS YET" />}
+          {tab === 'log' && <LogList bottomInset={barHeight + space.lg} />}
+          {tab === 'savings' && <SavingsView bottomInset={barHeight + space.lg} />}
         </View>
       </View>
       <Toast bottom={barHeight + space.sm} />

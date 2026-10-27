@@ -2,6 +2,7 @@
  * app/settings.tsx: Settings (PLAN §4 Pages), opened from ⊛ in the header.
  *
  *   > settings                              ✕
+ *   CHIPS  transaction labels · cash-in labels (add, rename, remove)
  *   FEEL   boot screen · haptics · reduce motion
  *   DATA   save backup · share backup · import · restore a snapshot · delete all data
  *   HELP   guide · what's new · report a problem · version
@@ -21,6 +22,7 @@ import { PageHeader } from '@/components/common/PageHeader';
 import { Rule } from '@/components/common/Rule';
 import { ActionSheet, type SheetAction } from '@/components/overlays/ActionSheet';
 import { backupFileName, countLedger, countsLabel, makeBackup } from '@/lib/backup';
+import type { ChipKind } from '@/lib/ledger';
 import type { Ledger } from '@/lib/types';
 import { appBuild, appVersion } from '@/services/appInfo';
 import { backupUi, pickBackupText, saveBackupToFolder, shareBackup } from '@/services/backup';
@@ -51,6 +53,7 @@ export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
   const settings = useAppStore((s) => s.settings);
   const hasBudget = useAppStore((s) => s.ledger.cycles.length > 0);
+  const chips = useAppStore((s) => s.ledger.chips);
   const actions = useActions();
   const set = (patch: Partial<Settings>) => actions.updateSettings(patch);
   const [sheet, setSheet] = useState<Sheet | null>(null);
@@ -155,6 +158,14 @@ export default function SettingsScreen() {
       <PageHeader title="settings" closeLabel="Close settings" />
 
       <ScrollView contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + space.xl }]}>
+        <Section title="CHIPS">
+          <Text style={[type.notes, styles.dim, styles.intro]} maxFontSizeMultiplier={maxFontSizeMultiplier}>
+            Quick labels to tap when you log. A label you type becomes a chip after its first use.
+          </Text>
+          <ChipList kind="spend" title="TRANSACTION LABELS" chips={chips.spend} />
+          <ChipList kind="income" title="CASH-IN LABELS" chips={chips.income} />
+        </Section>
+
         <Section title="FEEL">
           <Toggle
             label="Boot screen"
@@ -217,6 +228,31 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
         <Rule lit />
       </View>
       {children}
+    </View>
+  );
+}
+
+/** One chip list: each chip opens its edit page; ADD opens an empty one. */
+function ChipList({ kind, title, chips }: { kind: ChipKind; title: string; chips: string[] }) {
+  return (
+    <View style={styles.chipList}>
+      <Text style={[type.meta, styles.dim, styles.subheading]} accessibilityRole="header" maxFontSizeMultiplier={maxFontSizeMultiplier}>
+        {title}
+      </Text>
+      {chips.length === 0 && (
+        <Text style={[type.meta, styles.dim]} maxFontSizeMultiplier={maxFontSizeMultiplier}>
+          NONE YET
+        </Text>
+      )}
+      {chips.map((c, index) => (
+        <Action
+          key={c}
+          glyph={g.edit.glyph}
+          label={c.toUpperCase()}
+          onPress={() => router.push({ pathname: '/chip', params: { kind, index: String(index) } })}
+        />
+      ))}
+      <Action glyph={g.add.glyph} label="Add a label…" onPress={() => router.push({ pathname: '/chip', params: { kind } })} />
     </View>
   );
 }
@@ -299,6 +335,8 @@ const styles = StyleSheet.create({
   // The heading, then its rule to the right edge.
   sectionHead: { flexDirection: 'row', alignItems: 'center', gap: space.md, marginBottom: space.xs },
   intro: { marginBottom: space.sm },
+  chipList: { marginBottom: space.md },
+  subheading: { marginTop: space.md, marginBottom: space.xs, letterSpacing: 1 },
   // Out to the screen edges (the content's padding moved inside), so a press lights the whole row.
   row: {
     flexDirection: 'row',

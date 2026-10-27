@@ -46,8 +46,8 @@ function check(ok, what) {
   console.log(`✓ ${what}`);
 }
 
-/** A fresh page on empty storage (boot screen off, so flows start at once). */
-async function freshPage(browser) {
+/** A fresh page on empty storage (boot screen off, so flows start at once), optionally with a saved ledger. */
+async function freshPage(browser, ledger = null) {
   const page = await browser.newPage({ viewport: { width: 412, height: 915 }, deviceScaleFactor: 2 });
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
@@ -57,13 +57,21 @@ async function freshPage(browser) {
     if (!existsSync(file) || statSync(file).isDirectory()) file = join(site, 'index.html');
     return route.fulfill({ body: readFileSync(file), contentType: TYPES[extname(file)] ?? 'application/octet-stream' });
   });
-  await page.addInitScript(() => {
-    // Once per test page: empty storage, boot screen off.
-    if (sessionStorage.getItem('fresh')) return;
-    localStorage.clear();
-    localStorage.setItem('coin_log\\settings.v1', JSON.stringify({ bootSequence: false }));
-    sessionStorage.setItem('fresh', '1');
-  });
+  await page.addInitScript(
+    (saved) => {
+      // Once per test page: empty storage (or the given ledger), boot screen off.
+      if (sessionStorage.getItem('fresh')) return;
+      localStorage.clear();
+      localStorage.setItem('coin_log\\settings.v1', JSON.stringify({ bootSequence: false }));
+      if (saved) {
+        localStorage.setItem('coin_log\\ledger.v1', saved);
+        // A saved budget with no build seen counts as an update and opens What's new: mark every build as seen.
+        localStorage.setItem('coin_log\\onboarding.v1', JSON.stringify({ lastSeenBuild: Number.MAX_SAFE_INTEGER }));
+      }
+      sessionStorage.setItem('fresh', '1');
+    },
+    ledger && JSON.stringify(ledger),
+  );
   await page.goto(`${ORIGIN}/`);
   await page.waitForTimeout(1500);
   return { page, errors };
@@ -206,13 +214,165 @@ async function budgetFlows(page) {
   await page.screenshot({ path: join(shots, 'budget-tab.png') });
 }
 
+/** Swipes a row left with the mouse (the swipe-to-delete gesture). */
+async function swipeLeft(page, locator) {
+  const box = await locator.boundingBox();
+  const y = box.y + box.height / 2;
+  await page.mouse.move(box.x + box.width - 20, y);
+  await page.mouse.down();
+  for (let i = 1; i <= 12; i++) await page.mouse.move(box.x + box.width - 20 - i * 30, y, { steps: 2 });
+  await page.mouse.up();
+  await page.waitForTimeout(800);
+}
+
+/** F2, F8, F9 from the bottom bar; then F10 on LOG and F14 on SAVINGS. Credit spare 1550, debit spare 900, savings 8000 to start. */
+async function moneyFlows(page) {
+  // F2: R200 on credit, split R100 Food + R100 spare (spare credit 1550 → 1450).
+  await tap(page, 'Log a transaction');
+  await type(page, 'AMOUNT', '200');
+  await type(page, 'Label', 'Restaurant');
+  await page.getByRole('checkbox', { name: /^From Food,/ }).click();
+  await type(page, 'Amount from Food', '100');
+  let form = await text(page);
+  check(
+    form.includes('FOOD R1\u00A0100 LEFT') && form.includes('SPARE CREDIT R1\u00A0450'),
+    'a split previews each source after the transaction',
+  );
+  await page.screenshot({ path: join(shots, 'spend-split.png'), fullPage: true });
+  await tap(page, 'Log it');
+  check(
+    (await text(page)).includes('R1\u00A0450') && (await text(page)).includes('LOGGED'),
+    'LOG takes it out of Food and spare: LOGGED · UNDO',
+  );
+
+  // F2 again: the typed label is a chip now; on debit there are no budget lines, so it's all spare (900 → 800).
+  await tap(page, 'Log a transaction');
+  check((await text(page)).includes('RESTAURANT'), 'a typed label became a chip');
+  await page.getByRole('radio', { name: 'DEBIT', exact: true }).click();
+  await type(page, 'AMOUNT', '100');
+  await page.getByRole('radio', { name: 'Restaurant', exact: true }).click();
+  await tap(page, 'Log it');
+  check((await text(page)).includes('R800'), 'a debit transaction comes out of spare debit');
+
+  // F8: R300 debit → credit (debit 800 → 500, credit 1450 → 1750).
+  await tap(page, 'Move money');
+  await type(page, 'AMOUNT', '300');
+  await tap(page, 'Move it');
+  let main = await text(page);
+  check(main.includes('R500') && main.includes('R1\u00A0750') && main.includes('MOVED'), 'MOVE shifts spare debit to credit');
+
+  // F9: R500 cash in (debit 500 → 1000).
+  await tap(page, 'Log extra cash in');
+  await type(page, 'AMOUNT', '500');
+  await type(page, 'Label', 'Refund');
+  await tap(page, 'Log the cash in');
+  check((await text(page)).includes('R1\u00A0000'), 'cash in lands on spare debit');
+
+  // F10 on LOG: change the move to R200 (debit 1000 → 1100, credit 1750 → 1650).
+  await tap(page, 'Log of every entry');
+  main = await text(page);
+  check(
+    main.includes('THIS CYCLE') && main.includes('REFUND') && main.includes('DEBIT → CREDIT') && main.includes('START'),
+    'LOG lists every entry, newest first',
+  );
+  await page.screenshot({ path: join(shots, 'log-tab.png') });
+  await page
+    .getByRole('button', { name: /debit → credit/i })
+    .first()
+    .click();
+  await page.waitForTimeout(500);
+  await type(page, 'AMOUNT', '200');
+  await tap(page, 'Save');
+  main = await text(page);
+  check(main.includes('R1\u00A0100') && main.includes('R1\u00A0650') && main.includes('SAVED'), 'changing an entry redoes its money');
+
+  // F10: swipe the cash in away, then UNDO (debit 1100 → 600 → 1100).
+  await swipeLeft(page, page.getByRole('button', { name: /refund/i }).first());
+  main = await text(page);
+  check(
+    !main.includes('REFUND') && main.includes('R600') && main.includes('DELETED'),
+    'swiping left deletes an entry and its money goes back',
+  );
+  await tap(page, 'Undo');
+  check((await text(page)).includes('REFUND'), 'UNDO brings the entry back');
+
+  // F14 and F8 from SAVINGS: set 8 300, then R1 000 to credit (savings 7 300, credit 1650 → 2650).
+  await tap(page, 'Savings');
+  check((await text(page)).includes('R8\u00A0000'), 'SAVINGS shows the total from setup');
+  await tap(page, 'Set the savings balance');
+  await type(page, 'REAL TOTAL', '8300');
+  check((await text(page)).includes('+R300 LOGGED'), 'SET BALANCE previews the difference it logs');
+  await tap(page, 'Set savings');
+  await tap(page, 'Move savings to credit');
+  await type(page, 'AMOUNT', '1000');
+  await tap(page, 'Move it');
+  main = await text(page);
+  check(
+    main.includes('R7\u00A0300') && main.includes('R2\u00A0650') && main.includes('SAVINGS SET TO R8\u00A0300'),
+    'savings moves and corrections show in its history',
+  );
+  await page.screenshot({ path: join(shots, 'savings-tab.png') });
+}
+
+/** F12: from the pay date on, the red line says so and opens the salary load (a saved budget whose payday was yesterday). */
+async function paydayLine(browser) {
+  const day = 86_400_000;
+  const midnight = new Date();
+  midnight.setHours(0, 0, 0, 0);
+  const ledger = {
+    schemaVersion: 1,
+    cycles: [
+      {
+        id: 'c1',
+        startAt: midnight.getTime() - 30 * day,
+        payDate: midnight.getTime() - day,
+        closedAt: null,
+        lines: [{ id: 'food', side: 'credit', kind: 'budget', name: 'Food', isFood: true, amount: 600, base: 1800 }],
+        entries: [{ id: 'e1', at: midnight.getTime() - 30 * day, type: 'start', actualDebit: 1000, actualCredit: 1000, savingsOnHand: 0 }],
+      },
+    ],
+    chips: { spend: [], income: [] },
+  };
+  const { page, errors } = await freshPage(browser, ledger);
+  const main = await text(page);
+  check(main.includes('You Got Paid, Load Salary Now') && main.includes('PAYDAY PASSED'), 'after the pay date, the red payday line shows');
+  check(!main.includes('/DAY'), 'Food shows no per-day amount once payday is here');
+  await page.screenshot({ path: join(shots, 'payday-line.png') });
+  await tap(page, 'You Got Paid, Load Salary Now. Opens the salary load.');
+  check((await text(page)).includes('STEP 1/3 · AMOUNTS'), 'the payday line opens the salary load');
+  check(errors.length === 0, 'no page errors on the payday page');
+}
+
+/** D29: chips managed in Settings, then offered when logging. */
+async function chipFlows(page) {
+  await tap(page, 'Settings');
+  await page.getByRole('button', { name: 'Add a label…' }).first().click();
+  await page.waitForTimeout(400);
+  await type(page, 'LABEL', 'Fuel');
+  await tap(page, 'Add the label');
+  check((await text(page)).includes('FUEL'), 'a chip added in Settings is listed');
+  await page.getByRole('button', { name: 'FUEL', exact: true }).click();
+  await page.waitForTimeout(400);
+  await type(page, 'LABEL', 'Petrol');
+  await tap(page, 'Save the label');
+  const settings = await text(page);
+  check(settings.includes('PETROL') && !settings.includes('FUEL'), 'a chip can be renamed');
+  await tap(page, 'Close settings');
+  await tap(page, 'Log a transaction');
+  check((await text(page)).includes('PETROL'), 'the chip is offered when logging');
+  await tap(page, 'Cancel');
+}
+
 const browser = await chromium.launch();
 try {
   const { page, errors } = await freshPage(browser);
   await setUp(page);
   await loadSalary(page);
   await budgetFlows(page);
+  await moneyFlows(page);
+  await chipFlows(page);
   check(errors.length === 0, `no page errors${errors.length ? `: ${errors.join(' | ')}` : ''}`);
+  await paydayLine(browser);
 } finally {
   await browser.close();
 }

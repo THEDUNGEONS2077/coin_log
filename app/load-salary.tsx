@@ -20,10 +20,9 @@ import { router } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import { BackHandler, StyleSheet, Text, View } from 'react-native';
 
-import { NotYet } from '@/components/common/NotYet';
 import { Rule } from '@/components/common/Rule';
 import { useMinute } from '@/components/common/useMinute';
-import { AmountField, DateField, FormButton, FormPage, Segmented, SparePreview } from '@/components/form';
+import { AmountField, DateField, FormButton, FormPage, Missing, Segmented, SparePreview } from '@/components/form';
 import { anyProblem, draftsFrom, type LineDraft, toSalaryLines } from '@/components/lines/drafts';
 import { LinesEditor } from '@/components/lines/LinesEditor';
 import { addDays, addMonths, dayDiff, startOfDay } from '@/lib/dates';
@@ -54,7 +53,7 @@ function lastSalary(ledger: Ledger): SalaryEntry | null {
 
 export default function LoadSalaryScreen() {
   const { ledger, cycle } = useBudget();
-  if (!cycle) return <NotYet title="load salary" what="Set coin_log up first: the salary load starts from your current budget." />;
+  if (!cycle) return <Missing title="load salary" what="Set coin_log up first: the salary load starts from your current budget." />;
   return <LoadSalary ledger={ledger} template={templateLines(cycle)} />;
 }
 

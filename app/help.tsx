@@ -94,19 +94,23 @@ const SECTIONS: Section[] = [
     lines: [
       {
         key: `${g.add.glyph} LOG`,
-        what: 'A card tap. Choose a label (or type one), then split the amount over that side’s budget lines and spare. LOG works once the split adds up.',
+        what: 'A card tap: choose credit or debit, type the amount and a label (tap a chip, or type one), then tick the budget lines it came out of and how much each took. Spare covers the rest.',
       },
       { key: 'One tap, many lines', what: 'A grocery run can cover Food, toiletries and toilet paper at once: give each its part.' },
       { key: `${g.move.glyph} MOVE`, what: 'Debit to credit, debit to savings, or savings to debit or credit.' },
       { key: `${g.income.glyph} IN`, what: 'Extra cash into debit, with a label.' },
-      { key: 'Chips', what: 'Quick labels. A label you type becomes a chip after its first use; manage them in Settings.' },
+      {
+        key: 'Chips',
+        what: 'Quick labels. A label you type becomes a chip after its first use; add, rename or remove them in Settings → CHIPS.',
+      },
     ],
   },
   {
     title: 'LOG TAB',
     intro: 'Every entry, newest first: this cycle on top, older cycles folded below.',
     lines: [
-      { key: 'Tap an entry', what: 'Changes it (this cycle only).' },
+      { key: 'Tap an entry', what: 'Changes it (this cycle only): its own page opens, filled in.' },
+      { key: 'Older cycles', what: 'Folded under their dates: tap one to open it. They can’t be changed.' },
       { key: 'Swipe left', what: 'Deletes it: its money goes back where it came from. Deleting a paid bill reopens it.' },
       { key: 'Salary · start', what: 'Can only be undone right after, from their UNDO.' },
     ],
@@ -118,6 +122,7 @@ const SECTIONS: Section[] = [
       { key: '→ DEBIT · → CREDIT', what: 'Moves savings onto a side.' },
       { key: '← FROM DEBIT', what: 'Puts spare debit into savings.' },
       { key: 'SET BALANCE', what: 'Corrects the total (interest, a mistake). The difference is logged.' },
+      { key: 'History', what: 'Everything that changed savings. Tap or swipe one from this cycle, as on LOG.' },
     ],
   },
   {

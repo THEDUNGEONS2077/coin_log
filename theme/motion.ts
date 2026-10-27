@@ -39,6 +39,8 @@ export const timing = {
    * timeout): quicker, and every scroll would flash the row it starts on.
    */
   pressDelay: 100,
+  /** After a swipe starts or ends, a tap on the same row is ignored this long (it's the swipe's own release). */
+  swipeTapGuard: 400,
   /** How long a floating label stays fully visible (between a fast fade-in and a slow fade-out). */
   floatHold: 450,
 } as const;

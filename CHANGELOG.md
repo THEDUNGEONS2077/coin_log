@@ -1,5 +1,16 @@
 The changes in each coin_log version, newest first. The latest six show in the app (Settings → HELP → What's new).
 
+## 0.3.0 (build 3)
+
+Every flow in the plan: logging money, the LOG and SAVINGS tabs, and chips.
+
+- **+ LOG a transaction.** Credit or debit, the amount, a label (tap a chip or type one), then tick the budget lines it came out of and how much each took; spare covers the rest. One grocery run can cover Food, toiletries and toilet paper at once.
+- **↔ MOVE money** from debit to credit, between debit and savings, or from savings to credit.
+- **+ IN** logs extra cash into debit, with a label.
+- **The LOG tab.** Every entry, newest first, with what it did. Tap one from this cycle to change it; swipe it left to delete it (its money goes back, with UNDO). Older cycles are folded under their dates.
+- **The SAVINGS tab.** Your savings total, → DEBIT, → CREDIT, ← FROM DEBIT, SET BALANCE for corrections, and the history of everything that changed it.
+- **Chips.** A label you type becomes a chip after its first use. Settings → CHIPS adds, renames and removes them.
+
 ## 0.2.0 (build 2)
 
 Set up, payday and the BUDGET tab: the budget is real now. Logging money (+ LOG, MOVE, + IN) arrives next.

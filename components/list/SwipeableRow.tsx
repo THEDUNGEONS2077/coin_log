@@ -10,11 +10,23 @@
  * after 16 pt of horizontal movement, and fails as soon as the finger moves
  * 12 pt vertically (that's a scroll). All motion runs on the UI thread;
  * only the commit callback crosses to JS.
+ *
+ * A swipe is never also a tap (coin_log): Android cancels a row's tap when
+ * the swipe takes over, but the web build (the test harness) doesn't, so a
+ * row notes each swipe (useSwipeTapGuard + onSwipe) and ignores a tap that
+ * ends one.
  */
-import { type ReactNode, useEffect, useId, useMemo, useState } from 'react';
+import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import Animated, { interpolateColor, type SharedValue, useAnimatedStyle, useSharedValue, withDelay, withTiming } from 'react-native-reanimated';
+import Animated, {
+  interpolateColor,
+  type SharedValue,
+  useAnimatedStyle,
+  useSharedValue,
+  withDelay,
+  withTiming,
+} from 'react-native-reanimated';
 import { scheduleOnRN } from 'react-native-worklets';
 
 import { useSameItem } from '@/components/common/motion';
@@ -39,6 +51,19 @@ export interface SwipeAction {
   leaves?: boolean;
 }
 
+/**
+ * For a row with a tap of its own: `noteSwipe` goes to SwipeableRow's
+ * `onSwipe`, and the row's tap handler returns early while `justSwiped()`.
+ */
+export function useSwipeTapGuard() {
+  const at = useRef(0);
+  const noteSwipe = useCallback(() => {
+    at.current = Date.now();
+  }, []);
+  const justSwiped = useCallback(() => Date.now() - at.current < timing.swipeTapGuard, []);
+  return { noteSwipe, justSwiped };
+}
+
 interface Props {
   /** The item shown: when the list reuses the row for another one, it starts centred again. */
   id: string;
@@ -59,18 +84,25 @@ interface Props {
    * sideways move swipes, holding still for 300 ms starts a drag.
    */
   drag?: ReturnType<typeof Gesture.Pan> | null;
+  /** Called when a swipe starts and when it ends (useSwipeTapGuard). */
+  onSwipe?: () => void;
 }
 
 /** Each mounted row's current swipe actions, by its own key (useId), read when a swipe commits. */
-const current = new Map<string, { right?: SwipeAction; left?: SwipeAction }>();
+const current = new Map<string, { right?: SwipeAction; left?: SwipeAction; onSwipe?: () => void }>();
 
 /** Runs the action of the side swiped past (1: the right swipe's, -1: the left's) of row `key`. */
+/** Tells row `key` a swipe started or ended (its tap guard). */
+function swipeActivity(key: string): void {
+  current.get(key)?.onSwipe?.();
+}
+
 function commitSwipe(key: string, side: number): void {
   const actions = current.get(key);
   (side > 0 ? actions?.right : actions?.left)?.onCommit();
 }
 
-export function SwipeableRow({ id, children, right, left, enabled, drag, pressable = false }: Props) {
+export function SwipeableRow({ id, children, right, left, enabled, drag, pressable = false, onSwipe }: Props) {
   const x = useSharedValue(0);
   // 0 → 1: the row's pressed light (see `pressable`).
   const press = useSharedValue(0);
@@ -99,7 +131,7 @@ export function SwipeableRow({ id, children, right, left, enabled, drag, pressab
   // to the UI thread again.
   const key = useId();
   useEffect(() => {
-    current.set(key, { right, left });
+    current.set(key, { right, left, onSwipe });
   });
   useEffect(() => () => void current.delete(key), [key]);
   const hasRight = right !== undefined;
@@ -128,6 +160,7 @@ export function SwipeableRow({ id, children, right, left, enabled, drag, pressab
         .onStart(() => {
           press.set(withTiming(0, { duration: duration.fast, easing }));
           scheduleOnRN(setSwiping, true);
+          scheduleOnRN(swipeActivity, key);
         })
         .onUpdate((e) => {
           // Only allow directions that have an action.
@@ -140,6 +173,7 @@ export function SwipeableRow({ id, children, right, left, enabled, drag, pressab
           }
         })
         .onEnd(() => {
+          scheduleOnRN(swipeActivity, key);
           const side = armed.get();
           armed.set(0);
           if (side === 0) {

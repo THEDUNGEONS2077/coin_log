@@ -19,7 +19,7 @@ import { router } from 'expo-router';
 import { memo } from 'react';
 import { type AccessibilityActionEvent, Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { SwipeableRow } from '@/components/list/SwipeableRow';
+import { SwipeableRow, useSwipeTapGuard } from '@/components/list/SwipeableRow';
 import { Meter } from '@/components/list/Meter';
 import type { LineState } from '@/lib/ledger';
 import { formatRand } from '@/lib/money';
@@ -50,6 +50,8 @@ export const cancellable = (s: LineState) => !s.line.isFood && !s.paid;
 
 export const LineRow = memo(function LineRow({ state, payDate, now, onMenu }: Props) {
   const actions = useActions();
+  // A swipe's release isn't a tap (SwipeableRow).
+  const { noteSwipe, justSwiped } = useSwipeTapGuard();
   const { line, paid } = state;
   const isBill = line.kind === 'bill';
   const name = line.name.toUpperCase();
@@ -87,9 +89,10 @@ export const LineRow = memo(function LineRow({ state, payDate, now, onMenu }: Pr
       pressable
       right={isBill && !paid ? { label: `${glyphs.checkboxOn.glyph} PAID`, onCommit: () => openTick(line.id) } : undefined}
       left={cancellable(state) ? { label: `${glyphs.cancel.glyph} CANCEL`, onCommit: cancel } : undefined}
+      onSwipe={noteSwipe}
     >
       <Pressable
-        onPress={() => openEdit(line.id)}
+        onPress={() => !justSwiped() && openEdit(line.id)}
         onLongPress={() => onMenu(state)}
         delayLongPress={timing.pressDelay * 4}
         style={styles.row}
