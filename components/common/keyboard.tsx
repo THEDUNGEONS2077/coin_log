@@ -20,8 +20,8 @@
  * the developer screen shows (keyboardLog.ts).
  */
 import { type RefObject, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { AppState, Keyboard, StyleSheet, type TextInput, View, type ViewProps } from 'react-native';
-import { KeyboardController, KeyboardEvents, useReanimatedKeyboardAnimation } from 'react-native-keyboard-controller';
+import { AppState, Keyboard, type ScrollViewProps, StyleSheet, type TextInput, View, type ViewProps } from 'react-native';
+import { KeyboardAwareScrollView, KeyboardController, KeyboardEvents, useReanimatedKeyboardAnimation } from 'react-native-keyboard-controller';
 import Animated, { interpolate, useAnimatedReaction, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { scheduleOnRN } from 'react-native-worklets';
 
@@ -30,6 +30,24 @@ import { duration, easing } from '@/theme';
 import { logKeyboard } from './keyboardLog';
 
 export { KeyboardProvider } from 'react-native-keyboard-controller';
+
+/** Space kept between the focused field and the top of the keyboard (pt). */
+const FORM_KEYBOARD_GAP = 96;
+
+/**
+ * The scrolling body of a form page (coin_log's money forms, PLAN §8): a
+ * ScrollView that keeps the focused field above the keyboard, with room
+ * below it for the field's hint and the next field. Taps on buttons work
+ * while the keyboard is open.
+ *
+ * Why this and not quest_log's keepInView: that one keeps a list row in view
+ * under a toolbar inside a virtualized list; a form is a plain ScrollView,
+ * where the library's own measuring of the focused field is reliable. Forms
+ * are pages, never modals (keyboards and modals don't mix, see above).
+ */
+export function FormScroll(props: ScrollViewProps) {
+  return <KeyboardAwareScrollView bottomOffset={FORM_KEYBOARD_GAP} keyboardShouldPersistTaps="handled" {...props} />;
+}
 
 /** Longest wait for the keyboard to close before a sheet opens anyway. */
 const KEYBOARD_CLOSE_TIMEOUT_MS = 450;

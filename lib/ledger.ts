@@ -349,6 +349,17 @@ export interface StartInput {
   lines: StartLineInput[];
 }
 
+/**
+ * What each side's spare would be after setup (F0's live preview): each
+ * side's balance minus what its lines hold back now (a budget's LEFT NOW, an
+ * unpaid bill's amount; a paid bill holds nothing).
+ */
+export function startSpare(input: Pick<StartInput, 'actualDebit' | 'actualCredit' | 'lines'>): Record<Side, number> {
+  const holds = (l: StartLineInput) => (l.kind === 'budget' ? l.leftNow : l.paid ? 0 : l.monthly);
+  const held = (side: Side) => sum(input.lines.filter((l) => l.side === side).map(holds));
+  return { credit: input.actualCredit - held('credit'), debit: input.actualDebit - held('debit') };
+}
+
 /** F0: starts coin_log mid-cycle from the balances as they are now. */
 export function start(ledger: Ledger, input: StartInput, ids: Ids): Result {
   if (ledger.cycles.length > 0) return fail('COIN_LOG IS ALREADY SET UP');

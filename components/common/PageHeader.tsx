@@ -1,6 +1,6 @@
 /**
  * components/common/PageHeader.tsx: the header every page shares
- * (Settings, Help, What's new, Trash; aesthetic pass 2026-10-17).
+ * (Settings, Help, What's new, every form; quest_log's).
  *
  *   > settings                                  [✕]
  *   ────────────━━━━━━━━━━━━━━━━━━━────────────
@@ -21,28 +21,32 @@ import { LitEdge } from './Rule';
 interface Props {
   /** The page's name, lowercase as styled ("settings"). */
   title: string;
-  /** The close button's screen-reader label ("Close settings"). */
-  closeLabel: string;
+  /** The close button's screen-reader label ("Close settings"). Without it, there's no close button (the first-run setup). */
+  closeLabel?: string;
+  /** What closing does (default: back to the previous screen). */
+  onClose?: () => void;
 }
 
 /** `> title` and a close button, over the phosphor light, with a lit divider under it. */
-export function PageHeader({ title, closeLabel }: Props) {
+export function PageHeader({ title, closeLabel, onClose }: Props) {
   return (
     <View style={styles.header}>
       <Phosphor />
       <Text style={[type.display, styles.title]} accessibilityRole="header" maxFontSizeMultiplier={maxFontSizeMultiplier}>
         {`${glyphs.prompt.glyph} ${title}`}
       </Text>
-      <Pressable
-        onPress={() => router.back()}
-        style={({ pressed }) => [styles.close, pressed && styles.pressed]}
-        accessibilityRole="button"
-        accessibilityLabel={closeLabel}
-      >
-        <Text style={[type.glyph, styles.glyph]} maxFontSizeMultiplier={maxFontSizeMultiplier}>
-          {glyphs.delete.glyph}
-        </Text>
-      </Pressable>
+      {closeLabel !== undefined && (
+        <Pressable
+          onPress={onClose ?? (() => router.back())}
+          style={({ pressed }) => [styles.close, pressed && styles.pressed]}
+          accessibilityRole="button"
+          accessibilityLabel={closeLabel}
+        >
+          <Text style={[type.glyph, styles.glyph]} maxFontSizeMultiplier={maxFontSizeMultiplier}>
+            {glyphs.delete.glyph}
+          </Text>
+        </Pressable>
+      )}
       <LitEdge at="bottom" />
     </View>
   );
@@ -56,6 +60,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: space.lg,
     paddingTop: space.md,
     paddingBottom: space.sm,
+    // As tall as with the close button, when there isn't one.
+    minHeight: size.hitTarget + space.md + space.sm,
     borderBottomWidth: shape.hairline,
     borderBottomColor: colors.line,
   },

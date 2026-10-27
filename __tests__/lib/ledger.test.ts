@@ -31,6 +31,7 @@ import {
   type SpendInput,
   start,
   type StartInput,
+  startSpare,
   templateLines,
   tickBill,
   topUp,
@@ -128,6 +129,10 @@ describe('F0 start, mid-cycle', () => {
     expect(electricity.paid).toBe(true);
     expect(electricity.tick).toMatchObject({ paid: 0, beforeStart: true });
     expect(stateOf(l).balance.debit).toBe(5000);
+  });
+
+  it('matches the live preview', () => {
+    expect(startSpare(SETUP)).toEqual(stateOf(started()).spare);
   });
 
   it('refuses a pay date that is not after today', () => {

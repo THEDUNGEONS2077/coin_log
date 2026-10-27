@@ -10,6 +10,10 @@
  * Layer: UI (Expo Router screen). Composition only. The top panel never
  * scrolls; it's quest_log's lit terminal screen (Phosphor, LitEdge), with its
  * scanlines drifting while the screen is in view.
+ *
+ * Before there's a budget (a fresh install, or after Delete all data) the
+ * screen is the first-run setup instead (PLAN F0), with the toast still
+ * there, so Delete all data's UNDO can be tapped.
  */
 import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
@@ -24,6 +28,7 @@ import { LitEdge } from '@/components/common/Rule';
 import { Tabs } from '@/components/common/Tabs';
 import { TopStatus } from '@/components/common/TopStatus';
 import { Onboarding } from '@/components/common/useOnboarding';
+import { Setup } from '@/components/setup/Setup';
 import { Toast } from '@/components/overlays/Toast';
 import { useAppStore } from '@/store/react';
 import { colors, shape, size, space } from '@/theme';
@@ -33,8 +38,19 @@ export default function MainScreen() {
   // The list and the toast leave room for the bar that floats over the list.
   const [barHeight, setBarHeight] = useState<number>(size.hitTarget + space.lg + insets.bottom);
   const tab = useAppStore((s) => s.ui.tab);
+  const setUp = useAppStore((s) => s.ledger.cycles.length > 0);
   // While the boot screen covers the app, the panel's scanlines stay still (nothing to see, nothing to draw).
   const booting = useBooting();
+
+  if (!setUp) {
+    return (
+      <View style={styles.screen}>
+        <Onboarding />
+        <Setup />
+        <Toast bottom={insets.bottom + space.lg} />
+      </View>
+    );
+  }
 
   return (
     <View style={[styles.screen, { paddingTop: insets.top }]}>

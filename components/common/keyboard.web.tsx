@@ -1,6 +1,6 @@
 /**
  * components/common/keyboard.web.tsx: keyboard-aware building blocks for the
- * web build / iPhone PWA (native version: keyboard.tsx).
+ * web build, the local test harness (native version: keyboard.tsx).
  *
  * Layer: UI. Mobile Safari doesn't shrink the page when the on-screen
  * keyboard opens: it covers the bottom of the page. The visual viewport
@@ -10,7 +10,7 @@
  * and the editing toolbar sit just above the keyboard, as on Android.
  */
 import { type ReactNode, useEffect, useState } from 'react';
-import { type StyleProp, View, type ViewStyle } from 'react-native';
+import { ScrollView, type ScrollViewProps, type StyleProp, View, type ViewStyle } from 'react-native';
 
 /** How much of the bottom of the page the keyboard covers, in px (0 when closed). */
 export function useKeyboardInset(): number {
@@ -28,6 +28,11 @@ export function useKeyboardInset(): number {
     };
   }, []);
   return inset;
+}
+
+/** A form page's scrolling body (native version: keyboard.tsx); the browser scrolls a focused field into view itself. */
+export function FormScroll(props: ScrollViewProps) {
+  return <ScrollView keyboardShouldPersistTaps="handled" {...props} />;
 }
 
 /** Web needs no provider (the native library does); kept so the layout is the same on every platform. */
