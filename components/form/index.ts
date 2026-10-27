@@ -9,3 +9,5 @@ export { FormButton } from './FormButton';
 export { FormPage } from './FormPage';
 export { Segmented, type SegmentOption } from './Segmented';
 export { SparePreview } from './SparePreview';
+export { Missing } from './Missing';
+export { Preview } from './Preview';

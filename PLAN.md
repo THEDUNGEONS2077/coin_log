@@ -338,3 +338,6 @@ Start from a copy of quest_log's infrastructure in a new repo, `~/projects/coin_
 - **Import is replace only [P]**: merging two budgets has no clear meaning. It's one undo step.
 - **Delete all data [P]** (Settings → DATA) asks for confirmation, is one undo step, and returns the app to SETUP.
 - **Chip edits in Settings [P]** happen at once. Any toast still up is hidden, so an UNDO never undoes something other than what it names.
+- **Load salary prefills [P]:** DATE RECEIVED today (not later than today), SAVINGS R0, CREDIT the last salary's credit amount (empty before the first one), NEXT PAY DATE a month after the date received. Every prefill can be changed.
+- **The BUDGET tab [P]:** each line has a `≡` button for its menu (TOP UP, PAY, EDIT, CANCEL, as the line allows); holding the row opens the same menu. Food's `[+]` opens its top-up. Every gesture is also a screen-reader action.
+- **Forms preview their outcome [P]** by running the same rule the confirm button runs, so a refusal ("SPARE CREDIT WOULD BE SHORT BY R100") shows before confirming.

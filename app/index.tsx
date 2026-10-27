@@ -29,6 +29,7 @@ import { Tabs } from '@/components/common/Tabs';
 import { TopStatus } from '@/components/common/TopStatus';
 import { Onboarding } from '@/components/common/useOnboarding';
 import { Setup } from '@/components/setup/Setup';
+import { BudgetList } from '@/components/budget/BudgetList';
 import { Toast } from '@/components/overlays/Toast';
 import { useAppStore } from '@/store/react';
 import { colors, shape, size, space } from '@/theme';
@@ -64,8 +65,8 @@ export default function MainScreen() {
           <Tabs />
           <LitEdge at="bottom" />
         </View>
-        <View style={[styles.list, { paddingBottom: barHeight }]}>
-          {tab === 'budget' && <EmptyState message="NO BUDGET LINES YET" cursor />}
+        <View style={tab === 'budget' ? styles.list : [styles.list, { paddingBottom: barHeight }]}>
+          {tab === 'budget' && <BudgetList bottomInset={barHeight + space.lg} />}
           {tab === 'log' && <EmptyState message="NOTHING LOGGED YET" />}
           {tab === 'savings' && <EmptyState message="NO SAVINGS YET" />}
         </View>

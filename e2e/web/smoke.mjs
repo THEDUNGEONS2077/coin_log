@@ -149,11 +149,69 @@ async function loadSalary(page) {
   check((await text(page)).includes('R1 850'), 'UNDO brings the old cycle back');
 }
 
+/** The row for a line on the BUDGET tab (its screen-reader label starts with the name). */
+const row = (page, name) => page.getByRole('button', { name: new RegExp(`^${name},`) }).first();
+
+/** F3–F7 on the BUDGET tab, from the setup above: credit 3000 (Food 900 left, Toiletries 250), debit 5000 (Rent 4000). */
+async function budgetFlows(page) {
+  let main = await text(page);
+  check(main.includes('FOOD') && main.includes('TOILETRIES') && main.includes('RENT'), 'the BUDGET tab lists the lines');
+
+  // F3: Rent paid R3 800 instead of R4 000: R200 back to spare debit (1000 → 1200).
+  await page.getByText('[ ]', { exact: true }).first().click();
+  await page.waitForTimeout(500);
+  check((await text(page)).includes('RENT · DEBIT BILL'), 'the bill’s [ ] opens the tick-off');
+  await type(page, 'PAID', '3800');
+  check((await text(page)).includes('R200 GOES BACK TO SPARE DEBIT'), 'paying less previews the difference going back');
+  await tap(page, 'Paid: tick it off');
+  main = await text(page);
+  check(main.includes('PAID R3\u00A0800') && main.includes('R1\u00A0200'), 'the bill shows as paid and spare debit grows');
+
+  // F7: Food topped up by R100 from spare credit (1850 → 1750).
+  await row(page, 'Food').getByText('+', { exact: true }).click();
+  await page.waitForTimeout(500);
+  await type(page, 'AMOUNT', '100');
+  check((await text(page)).includes('FOOD R1\u00A0000 LEFT'), 'the top-up previews Food’s new amount');
+  await tap(page, 'Top up');
+  check((await text(page)).includes('R1\u00A0750'), 'a top-up comes out of spare credit');
+
+  // F6: a R300 debit bill added (spare debit 1200 → 900).
+  await tap(page, 'Add a debit line');
+  await type(page, 'NAME', 'Gym');
+  await tap(page, 'Bill: a fixed amount, ticked off when paid');
+  await type(page, 'BILL AMOUNT', '300');
+  await tap(page, 'Add the line');
+  main = await text(page);
+  check(main.includes('GYM') && main.includes('R900'), 'a new line is set aside from spare');
+
+  // F4: Toiletries cancelled from its menu (spare credit 1750 → 2000), then UNDO.
+  await row(page, 'Toiletries').getByText('≡', { exact: true }).click();
+  await page.waitForTimeout(500);
+  await tap(page, 'Cancel this line');
+  main = await text(page);
+  check(
+    !main.includes('TOILETRIES') && main.includes('R2\u00A0000') && main.includes('CANCELLED'),
+    'cancelling returns the line’s money to spare',
+  );
+  await tap(page, 'Undo');
+  check((await text(page)).includes('TOILETRIES'), 'UNDO puts the line back');
+
+  // F5: Food's amount set to R1 200 (with its top-up it was R1 000): spare credit 1750 → 1550.
+  await row(page, 'Food').click();
+  await page.waitForTimeout(500);
+  await type(page, 'AMOUNT THIS CYCLE', '1200');
+  await tap(page, 'Save the line');
+  main = await text(page);
+  check(main.includes('R1\u00A0550'), 'editing a line’s amount changes spare');
+  await page.screenshot({ path: join(shots, 'budget-tab.png') });
+}
+
 const browser = await chromium.launch();
 try {
   const { page, errors } = await freshPage(browser);
   await setUp(page);
   await loadSalary(page);
+  await budgetFlows(page);
   check(errors.length === 0, `no page errors${errors.length ? `: ${errors.join(' | ')}` : ''}`);
 } finally {
   await browser.close();
