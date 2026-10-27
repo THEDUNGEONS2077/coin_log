@@ -1,0 +1,73 @@
+/**
+ * theme/typography.ts: type roles, all in JetBrains Mono (quest_log's scale).
+ *
+ * Layer: theme. Components use a role (`type.body`) and never set
+ * fontSize/fontFamily themselves.
+ *
+ * The fonts are embedded at build time by the expo-font config plugin
+ * (see app.config.ts), so they're available on the first frame with no
+ * runtime loading. The family name is the font file's name without
+ * extension.
+ */
+import type { TextStyle } from 'react-native';
+
+/** Font family per weight. Names match the files in assets/fonts/. */
+export const fonts = {
+  regular: 'JetBrainsMono-Regular',
+  medium: 'JetBrainsMono-Medium',
+  bold: 'JetBrainsMono-Bold',
+} as const;
+
+/**
+ * Upper bound for OS text scaling. Pass to every <Text> and
+ * <TextInput> as `maxFontSizeMultiplier`. 1.6 keeps rows usable at large
+ * accessibility sizes without breaking layout.
+ */
+export const maxFontSizeMultiplier = 1.6;
+
+/** A type role: a complete text style (family, size, line height, spacing). */
+type Role = Pick<TextStyle, 'fontFamily' | 'fontSize' | 'lineHeight' | 'letterSpacing' | 'textTransform'>;
+
+/**
+ * Type roles: quest_log's, which its user asked to be one size step larger
+ * for readability (body 17).
+ */
+export const type = {
+  /** `> settings`-style screen titles, and the spare totals. */
+  display: { fontFamily: fonts.bold, fontSize: 22, lineHeight: 30 },
+  /** The main header `<R>_coin_log`: display +30%. */
+  title: { fontFamily: fonts.bold, fontSize: 29, lineHeight: 38 },
+  /** Tab labels: uppercase, +1 letter spacing. */
+  tab: { fontFamily: fonts.bold, fontSize: 14, lineHeight: 20, letterSpacing: 1, textTransform: 'uppercase' },
+  /** Top-level group headers: uppercase, drawn in textBright. */
+  // 20% smaller than body (17 → 14, user request 2026-10-08): uppercase bold already makes groups stand out.
+  group: { fontFamily: fonts.bold, fontSize: 14, lineHeight: 20, textTransform: 'uppercase' },
+  /** Line names, entry labels, field text. */
+  body: { fontFamily: fonts.regular, fontSize: 17, lineHeight: 24 },
+  /**
+   * Subtask titles: between group titles (14 caps) and top-level tasks (17),
+   * so the tree reads group → subtask at a glance (user request 2026-10-08).
+   */
+  subtask: { fontFamily: fonts.regular, fontSize: 15, lineHeight: 22 },
+  /** Amounts left, dates, hints. */
+  meta: { fontFamily: fonts.medium, fontSize: 13, lineHeight: 18 },
+  /** Notes text, drawn in textDim. */
+  notes: { fontFamily: fonts.regular, fontSize: 15, lineHeight: 22 },
+  /**
+   * Icon glyphs next to body text (▸ ▾ [ ] > ← → ✓ …): 20% larger than
+   * body (17 → 20, user request 2026-10-07). The line height stays body's,
+   * so rows don't get taller and glyphs stay aligned with the title.
+   */
+  glyph: { fontFamily: fonts.regular, fontSize: 20, lineHeight: 24 },
+  /**
+   * The ▸ / ▾ collapse caret (user requests 2026-10-08): +15% on top of
+   * `glyph` (20 → 23), +15% (→ 26), then +20% (→ 31). Its line height
+   * matches its size, so the glyph isn't clipped; rows absorb the extra
+   * height with a negative margin (see `caretFit` in theme/spacing.ts).
+   */
+  caretGlyph: { fontFamily: fonts.regular, fontSize: 31, lineHeight: 31 },
+  /** Icon glyphs next to meta text (≡ ◔ ↻ !): 20% larger than meta (13 → 16), same line height. */
+  metaGlyph: { fontFamily: fonts.medium, fontSize: 16, lineHeight: 18 },
+} as const satisfies Record<string, Role>;
+
+export type TypeRole = keyof typeof type;

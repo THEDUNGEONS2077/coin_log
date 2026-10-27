@@ -1,0 +1,197 @@
+/**
+ * components/common/BootSequence.tsx: the terminal boot screen
+ * (quest_log's, PLAN D31).
+ *
+ *   > coin_log v0.1.0
+ *   > MOUNTING /budget ......... OK
+ *   > SPARE CR R500 · SPARE DB R1 240
+ *   > READY█
+ *                tap to skip
+ *
+ * Layer: UI. <BootGate> wraps the app's screens and lays the boot screen
+ * over them, so the app is already rendered underneath and ready the moment
+ * it fades (it never delays startup). Rules:
+ *   - cold start only (once per JS process),
+ *   - lines type at 8 ms per character, hold briefly, then fade in 160 ms,
+ *   - a tap skips it,
+ *   - never shown with Reduce Motion, or with the "Boot screen" setting off.
+ *
+ * useBooting() tells the main screen when the boot screen is up, so things
+ * like What's new wait until it has gone.
+ *
+ * The look (aesthetic pass 2026-10-17): a lit terminal screen, with the
+ * phosphor light and scanlines of the main screen's top panel (Phosphor),
+ * the lines glowing softly, and one soft refresh band passing down the
+ * screen while they type, like a CRT warming up.
+ */
+import { createContext, type ReactNode, useContext, useEffect, useState } from 'react';
+import { Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+import { formatRand } from '@/lib/money';
+import { appVersion } from '@/services/appInfo';
+import { useAppStore, useBudget } from '@/store/react';
+import {
+  backgroundStyle,
+  colors,
+  easing,
+  easingScan,
+  effects,
+  glowTextSoft,
+  glyphs,
+  maxFontSizeMultiplier,
+  platformText,
+  space,
+  timing,
+  type,
+} from '@/theme';
+
+import { BlockCursor } from './BlockCursor';
+import { useReduceMotion } from './motion';
+import { Phosphor } from './Phosphor';
+
+/** Typing speed (quest_log's). */
+const MS_PER_CHAR = 8;
+/** Typing runs on a frame-ish tick, several characters per tick. */
+const TICK_MS = 16;
+/** How long the finished screen stays before fading. */
+const HOLD_MS = 350;
+
+/** Set once the boot screen has been decided for this JS process (cold start only). */
+let decided = false;
+
+/** Tests only: makes the next <BootGate> behave like a fresh cold start. */
+export function resetBootForTests(): void {
+  decided = false;
+}
+
+const BootContext = createContext(false);
+
+/** True while the boot screen covers the app. */
+export function useBooting(): boolean {
+  return useContext(BootContext);
+}
+
+/** Wraps the app's screens; shows the boot screen over them on a cold start. */
+export function BootGate({ children }: { children: ReactNode }) {
+  const enabled = useAppStore((s) => s.settings.bootSequence);
+  const reduce = useReduceMotion();
+  // Decided on the first render only: settings changed later don't replay it.
+  const [booting, setBooting] = useState(() => !decided && enabled && !reduce);
+  useEffect(() => {
+    decided = true;
+  }, []);
+
+  return (
+    <BootContext.Provider value={booting}>
+      {children}
+      {booting && <BootScreen onDone={() => setBooting(false)} />}
+    </BootContext.Provider>
+  );
+}
+
+function BootScreen({ onDone }: { onDone: () => void }) {
+  const insets = useSafeAreaInsets();
+  const { state } = useBudget();
+  const lines = [
+    `${glyphs.prompt.glyph} coin_log v${appVersion()}`,
+    `${glyphs.prompt.glyph} MOUNTING /budget ......... OK`,
+    `${glyphs.prompt.glyph} ${state ? `SPARE CR ${formatRand(state.spare.credit)} · SPARE DB ${formatRand(state.spare.debit)}` : 'NO BUDGET YET'}`,
+    `${glyphs.prompt.glyph} READY`,
+  ];
+  const total = lines.reduce((n, l) => n + l.length, 0);
+
+  // Characters typed so far, across all lines.
+  const [typed, setTyped] = useState(0);
+  const opacity = useSharedValue(1);
+  const [leaving, setLeaving] = useState(false);
+
+  // Type the lines, a few characters per tick.
+  useEffect(() => {
+    if (leaving) return;
+    const t = setInterval(() => setTyped((n) => Math.min(total, n + TICK_MS / MS_PER_CHAR)), TICK_MS);
+    return () => clearInterval(t);
+  }, [total, leaving]);
+
+  // Finished typing: hold, then leave.
+  const done = typed >= total;
+  useEffect(() => {
+    if (!done) return;
+    const t = setTimeout(() => setLeaving(true), HOLD_MS);
+    return () => clearTimeout(t);
+  }, [done]);
+
+  // Leaving (finished, or tapped): fade out, then unmount.
+  useEffect(() => {
+    if (!leaving) return;
+    opacity.set(withTiming(0, { duration: timing.bootFade, easing }));
+    const t = setTimeout(onDone, timing.bootFade);
+    return () => clearTimeout(t);
+  }, [leaving, opacity, onDone]);
+
+  const fade = useAnimatedStyle(() => ({ opacity: opacity.get() }));
+
+  // Slice the typed characters into the lines; the cursor sits after the last one.
+  let left = typed;
+  const shown = lines.map((l) => {
+    const part = l.slice(0, Math.max(0, left));
+    left -= l.length;
+    return part;
+  });
+  let last = 0;
+  shown.forEach((l, i) => {
+    if (l.length > 0) last = i;
+  });
+
+  return (
+    <Animated.View style={[StyleSheet.absoluteFill, styles.screen, fade]}>
+      <Phosphor />
+      <RefreshBand />
+      <Pressable
+        style={[styles.press, { paddingTop: insets.top + space.xl, paddingBottom: insets.bottom + space.xl }]}
+        onPress={() => setLeaving(true)}
+        accessibilityRole="button"
+        accessibilityLabel="coin_log is starting. Double tap to skip."
+        accessibilityViewIsModal
+      >
+        <View>
+          {shown.map((l, i) => (
+            <Text key={i} style={[type.body, styles.line]} maxFontSizeMultiplier={maxFontSizeMultiplier}>
+              {l}
+              {i === last && <BlockCursor />}
+            </Text>
+          ))}
+        </View>
+        <Text style={[type.meta, styles.skip]} maxFontSizeMultiplier={maxFontSizeMultiplier}>
+          tap to skip
+        </Text>
+      </Pressable>
+    </Animated.View>
+  );
+}
+
+/** The refresh band's height, as a share of the screen. */
+const BAND_SHARE = 0.3;
+
+/** A soft bright band that passes down the screen once (timing.bootSweep), then is gone. */
+function RefreshBand() {
+  const { height } = useWindowDimensions();
+  const band = height * BAND_SHARE;
+  // 0 = just above the screen, 1 = just below it.
+  const pass = useSharedValue(0);
+  useEffect(() => {
+    pass.set(withTiming(1, { duration: timing.bootSweep, easing: easingScan }));
+  }, [pass]);
+  const style = useAnimatedStyle(() => ({ transform: [{ translateY: -band + pass.get() * (height + band) }] }));
+  return <Animated.View pointerEvents="none" style={[styles.band, { height: band }, backgroundStyle(effects.band), style]} />;
+}
+
+const styles = StyleSheet.create({
+  screen: { backgroundColor: colors.bg },
+  press: { flex: 1, justifyContent: 'space-between', paddingHorizontal: space.lg },
+  // The boot lines glow softly, like the title they lead to.
+  line: { color: colors.accent, ...glowTextSoft, ...platformText },
+  band: { position: 'absolute', top: 0, left: 0, right: 0 },
+  skip: { color: colors.textDim, textAlign: 'center', ...platformText },
+});

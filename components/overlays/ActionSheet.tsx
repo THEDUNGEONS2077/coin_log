@@ -1,0 +1,101 @@
+/**
+ * components/overlays/ActionSheet.tsx: a terminal-style bottom sheet of
+ * actions (quest_log's).
+ *
+ *   > Plan trip
+ *   ────────────
+ *   ↺ Restore
+ *   ⊞ Run again
+ *   ✕ Delete
+ *
+ * Layer: UI. Used by the COMPLETED tab (long-press a row, CLEAR…). The
+ * Phase 6 context menu builds on it. Options sit at the bottom of the
+ * screen, within thumb reach, and each row is at least 52 pt tall. Tapping
+ * outside or pressing back closes it.
+ */
+import type { ReactNode } from 'react';
+import { Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+import { SheetModal } from './SheetModal';
+import { Prompted } from '@/components/common/Prompted';
+import { colors, glowShadow, glowTextSoft, maxFontSizeMultiplier, platformText, shape, size, space, type } from '@/theme';
+
+export interface SheetAction {
+  glyph: string;
+  label: string;
+  onPress: () => void;
+  /** Leave the sheet open (the action shows a follow-up sheet, e.g. sort options). */
+  keepOpen?: boolean;
+}
+
+interface Props {
+  visible: boolean;
+  /** Shown as `> title` at the top. */
+  title: string;
+  actions: SheetAction[];
+  onClose: () => void;
+  /** Optional content between the title and the actions (e.g. the priority selector). */
+  children?: ReactNode;
+}
+
+/** The sheet never covers more than this share of the screen; longer menus scroll. */
+const MAX_HEIGHT_SHARE = 0.85;
+
+export function ActionSheet({ visible, title, actions, onClose, children }: Props) {
+  const insets = useSafeAreaInsets();
+  const { height } = useWindowDimensions();
+  return (
+    // Tap outside or press back to close; the sheet slides up (SheetModal).
+    <SheetModal
+      visible={visible}
+      onClose={onClose}
+      sheetStyle={[styles.sheet, { paddingBottom: insets.bottom + space.sm, maxHeight: height * MAX_HEIGHT_SHARE }]}
+    >
+      <Text style={[type.body, styles.title]} numberOfLines={2} maxFontSizeMultiplier={maxFontSizeMultiplier}>
+        <Prompted>{title}</Prompted>
+      </Text>
+      <View style={styles.divider} />
+      <ScrollView bounces={false}>
+        {children}
+        {actions.map((a) => (
+          <Pressable
+            key={a.label}
+            style={({ pressed }) => [styles.action, pressed && styles.pressed]}
+            onPress={() => {
+              if (!a.keepOpen) onClose();
+              a.onPress();
+            }}
+            accessibilityRole="button"
+            accessibilityLabel={a.label}
+          >
+            <Text style={[type.glyph, styles.glyph]} maxFontSizeMultiplier={maxFontSizeMultiplier}>
+              {a.glyph}
+            </Text>
+            <Text style={[type.body, styles.label]} maxFontSizeMultiplier={maxFontSizeMultiplier}>
+              {a.label}
+            </Text>
+          </Pressable>
+        ))}
+      </ScrollView>
+    </SheetModal>
+  );
+}
+
+const styles = StyleSheet.create({
+  sheet: {
+    backgroundColor: colors.surfaceRaised,
+    borderTopWidth: shape.hairline,
+    borderColor: colors.line,
+    borderTopLeftRadius: shape.radius,
+    borderTopRightRadius: shape.radius,
+    paddingTop: space.lg,
+  },
+  title: { color: colors.textBright, paddingHorizontal: space.lg, ...platformText },
+  divider: { height: shape.hairline, backgroundColor: colors.line, marginTop: space.md },
+  action: { flexDirection: 'row', alignItems: 'center', minHeight: size.rowMinHeight, paddingHorizontal: space.lg },
+  // Pressed: the row lights up from its left edge (like the selected row's bar in the list).
+  pressed: { backgroundColor: colors.surface, boxShadow: glowShadow.edge },
+  glyph: { color: colors.accent, width: size.indent + space.sm, ...glowTextSoft, ...platformText },
+  label: { color: colors.text, ...platformText },
+});

@@ -1,0 +1,14 @@
+/**
+ * theme/index.ts: single import point for design tokens.
+ *
+ * Usage: `import { colors, type, space } from '@/theme';`
+ * Rule (ARCHITECTURE.md §1): no magic numbers or hex values in components; everything
+ * comes through here.
+ */
+export * from './colors';
+export * from './typography';
+export * from './spacing';
+export * from './motion';
+export * from './glyphs';
+export * from './platform';
+export * from './effects';

@@ -1,0 +1,9 @@
+The changes in each coin_log version, newest first. The latest six show in the app (Settings → HELP → What's new).
+
+## 0.1.0 (build 1)
+
+The look: coin_log's shell, built from quest_log, in yellow. The money flows arrive in the next builds.
+
+- **Yellow terminal design.** quest_log's look with yellow in place of green: the lit top panel with drifting scanlines, the boot screen, the `<R>` icon.
+- **The main screen's layout.** SPARE CR and SPARE DB at the top, days to payday with ⊕ SALARY, the BUDGET / LOG / SAVINGS tabs, and + LOG, ↔ MOVE and + IN at the bottom. The buttons open pages that say what's coming.
+- **Settings.** Boot screen, haptics and reduce motion; backups, imports and daily snapshots; the user guide.

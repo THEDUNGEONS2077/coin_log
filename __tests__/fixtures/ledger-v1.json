@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "cycles": [
+    {
+      "id": "c1",
+      "startAt": 1792537200000,
+      "payDate": 1793833200000,
+      "closedAt": 1793869200000,
+      "lines": [
+        { "id": "food", "side": "credit", "kind": "budget", "name": "Food", "isFood": true, "amount": 900, "base": 1800 },
+        { "id": "rent", "side": "debit", "kind": "bill", "name": "Rent", "isFood": false, "amount": 4000, "base": 4000 }
+      ],
+      "entries": [
+        { "id": "e1", "at": 1792580400000, "type": "start", "actualDebit": 5000, "actualCredit": 1500, "savingsOnHand": 8000 },
+        { "id": "e2", "at": 1792584000000, "type": "spend", "side": "credit", "total": 200, "label": "Restaurant", "parts": [{ "source": "food", "amount": 100 }, { "source": "spare", "amount": 100 }] },
+        { "id": "e3", "at": 1792587600000, "type": "tick", "lineId": "rent", "paid": 4000 }
+      ]
+    },
+    {
+      "id": "c2",
+      "startAt": 1793833200000,
+      "payDate": 1796428800000,
+      "closedAt": null,
+      "lines": [
+        { "id": "food", "side": "credit", "kind": "budget", "name": "Food", "isFood": true, "amount": 1800, "base": 1800 },
+        { "id": "rent", "side": "debit", "kind": "bill", "name": "Rent", "isFood": false, "amount": 4000, "base": 4000 }
+      ],
+      "entries": [
+        { "id": "e4", "at": 1793869200000, "type": "salary", "salary": 20000, "savings": 3000, "credit": 3000, "actualDebit": 14500, "actualCredit": 3200 },
+        { "id": "e5", "at": 1793872800000, "type": "move", "route": "debit-savings", "amount": 1000 },
+        { "id": "e6", "at": 1793876400000, "type": "adjust", "delta": 250, "setTo": 12250 }
+      ]
+    }
+  ],
+  "chips": { "spend": ["Restaurant"], "income": [] }
+}
