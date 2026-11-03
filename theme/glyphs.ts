@@ -52,6 +52,10 @@ export const glyphs = {
   income: g('+'),
   /** A savings SET BALANCE correction (F14). */
   adjust: g('±'),
+  /** Expected money received from someone (F16). */
+  receive: g('↓'),
+  /** Expected money carried over from last cycle, still due (D37). */
+  carry: g('⋯'),
 
   // --- Header and actions ---
   add: g('+'),

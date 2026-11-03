@@ -23,18 +23,24 @@
  * and, for a budget, what's LEFT NOW (empty = all of it), or, for a bill,
  * whether it's ALREADY PAID this cycle. In the salary load ('salary') a line
  * has one AMOUNT: this cycle's, which also becomes its default (D27).
+ *
+ * A debit bill also has COMING IN (F15): money someone else pays in towards
+ * it. In setup it can be marked ALREADY RECEIVED; a bill already paid has
+ * nothing left to come in, so it isn't offered there.
  */
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { Rule } from '@/components/common/Rule';
+import { ExpectedFields } from '@/components/form/ExpectedFields';
 import { AmountField, TextField } from '@/components/form/Field';
 import { Segmented } from '@/components/form/Segmented';
-import { sideLabel, SIDES } from '@/lib/ledger';
+import { payerKey, sideLabel, SIDES } from '@/lib/ledger';
+import { parseRand } from '@/lib/money';
 import type { LineKind } from '@/lib/types';
 import { haptics } from '@/services/haptics';
 import { colors, glyphs, maxFontSizeMultiplier, platformText, shape, size, space, type } from '@/theme';
 
-import { type DraftMode, draftProblems, type LineDraft, newDraft } from './drafts';
+import { type DraftMode, draftProblems, type LineDraft, newDraft, takesExpected } from './drafts';
 
 interface Props {
   mode: DraftMode;
@@ -42,6 +48,20 @@ interface Props {
   onChange: (drafts: LineDraft[]) => void;
   /** Mark the fields that can't be used (after a first attempt to go on). */
   showProblems: boolean;
+}
+
+/** The payers typed on these cards, each once (FROM's chips on another card, D33). */
+function draftPayers(drafts: readonly LineDraft[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const d of drafts) {
+    const p = d.expected.on ? d.expected.payer.trim() : '';
+    if (p !== '' && !seen.has(payerKey(p))) {
+      seen.add(payerKey(p));
+      out.push(p);
+    }
+  }
+  return out;
 }
 
 /** The lines, grouped CREDIT then DEBIT, each side with its ADD button. */
@@ -72,6 +92,7 @@ export function LinesEditor({ mode, drafts, onChange, showProblems }: Props) {
                 key={d.key}
                 draft={d}
                 mode={mode}
+                payers={draftPayers(drafts.filter((x) => x.key !== d.key))}
                 showProblems={showProblems}
                 onChange={(patch) => update(d.key, patch)}
                 onRemove={() => remove(d.key)}
@@ -103,13 +124,15 @@ const SIDE_OPTIONS = SIDES.map((s) => ({ key: s, label: sideLabel(s) }));
 interface CardProps {
   draft: LineDraft;
   mode: DraftMode;
+  /** Payers named on the other cards, for FROM's chips. */
+  payers: readonly string[];
   showProblems: boolean;
   onChange: (patch: Partial<LineDraft>) => void;
   onRemove: () => void;
 }
 
 /** One line's fields, in a hairline frame. */
-function LineCard({ draft: d, mode, showProblems, onChange, onRemove }: CardProps) {
+function LineCard({ draft: d, mode, payers, showProblems, onChange, onRemove }: CardProps) {
   const problems = draftProblems(d, mode);
   const show = (p: string | null) => (showProblems ? p : null);
   const named = d.isFood ? 'Food' : d.name.trim() || 'New line';
@@ -184,6 +207,18 @@ function LineCard({ draft: d, mode, showProblems, onChange, onRemove }: CardProp
           onChange={(amount) => onChange({ amount })}
           problem={show(problems.amount)}
           accessibilityLabel={`${named}, amount`}
+        />
+      )}
+
+      {takesExpected(d.kind, d.side) && !(mode === 'start' && d.paid) && (
+        <ExpectedFields
+          value={d.expected}
+          onChange={(expected) => onChange({ expected })}
+          bill={parseRand(d.amount)}
+          payers={payers}
+          showReceived={mode === 'start'}
+          showProblems={showProblems}
+          name={named}
         />
       )}
     </View>

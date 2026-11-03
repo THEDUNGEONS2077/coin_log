@@ -13,19 +13,21 @@
  *   + REFUND       +R500 DB
  *   ↔ DEBIT → CREDIT  R400
  *   ± SAVINGS SET TO R8 300  +R300
+ *   ↓ FROM PARTNER  +R5 400 DB  RENT R5 000 · INTERNET R400
+ *   ⋯ PARTNER STILL DUE R5 400 DB  CARRIED FROM LAST CYCLE
  *
  * Signs are from the point of view of the money it touches: spending is
  * minus, money in is plus; moves within the budget (top-ups, moves) carry no
  * sign, since nothing leaves or arrives.
  */
-import { debitShare, lineName, routeLabel, savingsDelta, sideLabel } from './ledger';
+import { debitShare, expectedOf, lineName, routeLabel, savingsDelta, sideLabel } from './ledger';
 import { formatDelta, formatRand } from './money';
 import { type Cycle, type Entry, type Ledger, type Side, SPARE } from './types';
 
 /** How an entry is shown in a list. */
 export interface EntryView {
   /** The entry type's glyph name (theme/glyphs.ts). */
-  glyph: 'start' | 'salary' | 'spend' | 'paid' | 'cancel' | 'topUp' | 'income' | 'move' | 'adjust';
+  glyph: 'start' | 'salary' | 'spend' | 'paid' | 'cancel' | 'topUp' | 'income' | 'move' | 'adjust' | 'receive' | 'carry';
   /** "RESTAURANT", "PAID RENT", … (uppercase). */
   title: string;
   /** The amount, signed where money leaves or arrives ("−R200", "+R500", "R400"); null when there's no single amount. */
@@ -107,6 +109,31 @@ export function describeEntry(entry: Entry, cycle: Cycle): EntryView {
         amount: formatDelta(entry.delta),
         side: null,
         detail: null,
+      };
+    case 'receive': {
+      if (entry.beforeStart) {
+        return { glyph: 'receive', title: `FROM ${entry.payer.toUpperCase()}`, amount: null, side: 'DB', detail: 'RECEIVED BEFORE SETUP' };
+      }
+      // What it covered, and what was expected when a different amount arrived (D34).
+      const expected = expectedOf(entry, cycle);
+      const covered = entry.carryId
+        ? 'FROM LAST CYCLE'
+        : entry.shares.map((sh) => `${lineName(cycle, sh.lineId).toUpperCase()} ${formatRand(sh.amount)}`).join(' · ');
+      return {
+        glyph: 'receive',
+        title: `FROM ${entry.payer.toUpperCase()}`,
+        amount: formatDelta(entry.amount),
+        side: 'DB',
+        detail: entry.amount === expected ? covered : `${covered} · EXPECTED ${formatRand(expected)}`,
+      };
+    }
+    case 'carry':
+      return {
+        glyph: 'carry',
+        title: `${entry.payer.toUpperCase()} STILL DUE`,
+        amount: formatRand(entry.amount),
+        side: 'DB',
+        detail: 'CARRIED FROM LAST CYCLE',
       };
   }
 }

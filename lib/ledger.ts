@@ -25,14 +25,24 @@
  *   income        debit +amount
  *   move          debit/credit/savings ± amount
  *   adjust        savings ± delta
+ *   receive       debit +amount; the bills it covers hold back their full amount
+ *   carry         nothing (a reminder of money still due from last cycle)
  * spare[side] = balance[side] − what that side's lines hold back.
+ *
+ * Expected money (PLAN D32–D37): a debit bill can carry an amount someone
+ * else pays in. Until it's received the bill holds back only its own share
+ * (amount − expected), so receiving it leaves spare unchanged. A bill with
+ * money still due can't be ticked off (D35): `commit` refuses any state
+ * where it is.
  */
 import { dayDiff, startOfDay } from './dates';
 import { formatRand, isRand, sum } from './money';
 import {
   type CancelEntry,
+  type CarryEntry,
   type Cycle,
   type Entry,
+  type Expected,
   type ID,
   type Ledger,
   type Line,
@@ -40,7 +50,9 @@ import {
   type MoveRoute,
   type Part,
   type Rand,
+  type ReceiveEntry,
   SCHEMA_VERSION,
+  type Share,
   type Side,
   SPARE,
   type SpendEntry,
@@ -88,6 +100,10 @@ export interface LineState {
   paid: boolean;
   /** The bill's tick entry, once paid. */
   tick: TickEntry | null;
+  /** A bill's expected money (D32) has been received this cycle. False when it has none. */
+  received: boolean;
+  /** A bill's expected money still to arrive: its expected amount until received, else 0. */
+  due: Rand;
 }
 
 /** A cycle's numbers, as shown on screen. */
@@ -111,13 +127,14 @@ function balanceDelta(entry: Entry, side: Side, lineSide: (id: ID) => Side | und
     case 'tick':
       return lineSide(entry.lineId) === side ? -entry.paid : 0;
     case 'income':
+    case 'receive':
       return side === 'debit' ? entry.amount : 0;
     case 'move': {
       const [from, to] = routeEnds(entry.route);
       return (to === side ? entry.amount : 0) - (from === side ? entry.amount : 0);
     }
     default:
-      // topup and cancel move money within a side; adjust is savings only.
+      // topup and cancel move money within a side; adjust is savings only; carry moves nothing.
       return 0;
   }
 }
@@ -154,11 +171,13 @@ export function computeCycle(cycle: Cycle): CycleState {
   const topUps = new Map<ID, number>();
   const drawn = new Map<ID, number>();
   const ticks = new Map<ID, TickEntry>();
+  const received = new Set<ID>();
   const balance: Record<Side, number> = { credit: 0, debit: 0 };
   for (const e of cycle.entries) {
     for (const side of SIDES) balance[side] += balanceDelta(e, side, lineSide);
     if (e.type === 'topup') topUps.set(e.lineId, (topUps.get(e.lineId) ?? 0) + e.amount);
     if (e.type === 'tick') ticks.set(e.lineId, e);
+    if (e.type === 'receive') for (const sh of e.shares) received.add(sh.lineId);
     if (e.type === 'spend') {
       for (const p of e.parts) if (p.source !== SPARE) drawn.set(p.source, (drawn.get(p.source) ?? 0) + p.amount);
     }
@@ -168,15 +187,18 @@ export function computeCycle(cycle: Cycle): CycleState {
   const lines = cycle.lines.map((line): LineState => {
     if (line.kind === 'bill') {
       const tick = ticks.get(line.id) ?? null;
-      const left = tick ? 0 : line.amount;
+      const isIn = line.expected !== undefined && received.has(line.id);
+      const due = line.expected && !isIn ? line.expected.amount : 0;
+      // Until someone else's share arrives, the bill holds back only yours (D32).
+      const left = tick ? 0 : line.amount - due;
       held[line.side] += left;
-      return { line, allocated: line.amount, spent: tick?.paid ?? 0, left, paid: tick !== null, tick };
+      return { line, allocated: line.amount, spent: tick?.paid ?? 0, left, paid: tick !== null, tick, received: isIn, due };
     }
     const allocated = line.amount + (topUps.get(line.id) ?? 0);
     const spent = drawn.get(line.id) ?? 0;
     const left = allocated - spent;
     held[line.side] += left;
-    return { line, allocated, spent, left, paid: false, tick: null };
+    return { line, allocated, spent, left, paid: false, tick: null, received: false, due: 0 };
   });
 
   return { balance, spare: { credit: balance.credit - held.credit, debit: balance.debit - held.debit }, lines };
@@ -200,6 +222,98 @@ export function lineName(cycle: Cycle, id: ID): string {
   const line =
     cycle.lines.find((l) => l.id === id) ?? cycle.entries.find((e): e is CancelEntry => e.type === 'cancel' && e.line.id === id)?.line;
   return line?.name ?? '?';
+}
+
+// ---------------------------------------------------------------------------
+// Expected money still due (PLAN D32–D37)
+// ---------------------------------------------------------------------------
+
+/** Payers are matched without regard to case or spacing ("partner" and "Partner " are one payer, D33). */
+export function payerKey(payer: string): string {
+  return payer.trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
+/** Money still to be received in a cycle: one payer's bill shares, or one carried amount. */
+export interface Due {
+  /** What RECEIVE is opened with: `bills:<payer key>` or `carry:<carry entry ID>`. */
+  key: string;
+  /** As first typed. */
+  payer: string;
+  /** The total expected. */
+  amount: Rand;
+  /** The bill shares (empty for a carried amount). */
+  shares: Share[];
+  /** The carry entry, for money carried over from last cycle. */
+  carryId?: ID;
+}
+
+/**
+ * Everything still due in a cycle (F16's list, + IN's list, the salary
+ * load's CARRY / DROP step): each payer's shares on open bills not yet
+ * received (in line order), then each carried amount not yet received.
+ */
+export function dues(cycle: Cycle): Due[] {
+  const state = computeCycle(cycle);
+  const byPayer = new Map<string, Due>();
+  for (const l of state.lines) {
+    if (!l.line.expected || l.due === 0 || l.paid) continue;
+    const k = payerKey(l.line.expected.payer);
+    const due = byPayer.get(k) ?? { key: `bills:${k}`, payer: l.line.expected.payer, amount: 0, shares: [] };
+    due.amount += l.due;
+    due.shares.push({ lineId: l.line.id, amount: l.due });
+    byPayer.set(k, due);
+  }
+  const settled = new Set(cycle.entries.flatMap((e) => (e.type === 'receive' && e.carryId ? [e.carryId] : [])));
+  const carried = cycle.entries
+    .filter((e): e is CarryEntry => e.type === 'carry' && !settled.has(e.id))
+    .map((e): Due => ({ key: `carry:${e.id}`, payer: e.payer, amount: e.amount, shares: [], carryId: e.id }));
+  return [...byPayer.values(), ...carried];
+}
+
+/** What's still due per payer, everything together (the salary load's CARRY / DROP step, D37). */
+export function payerDues(cycle: Cycle): { key: string; payer: string; amount: Rand }[] {
+  const out = new Map<string, { key: string; payer: string; amount: Rand }>();
+  for (const d of dues(cycle)) {
+    const k = payerKey(d.payer);
+    const row = out.get(k) ?? { key: k, payer: d.payer, amount: 0 };
+    row.amount += d.amount;
+    out.set(k, row);
+  }
+  return [...out.values()];
+}
+
+/** Every payer named on the current cycle's lines or carried amounts (the payer chips on a line form, F15). */
+export function knownPayers(ledger: Ledger): string[] {
+  const cycle = currentCycle(ledger);
+  if (!cycle) return [];
+  const names = [
+    ...cycle.lines.flatMap((l) => (l.expected ? [l.expected.payer] : [])),
+    ...cycle.entries.flatMap((e) => (e.type === 'carry' ? [e.payer] : [])),
+  ];
+  const seen = new Set<string>();
+  return names.filter((n) => !seen.has(payerKey(n)) && seen.add(payerKey(n)));
+}
+
+/** "PARTNER R5 400 DUE" (a bill row's tag, + IN's list). */
+export function describeDue(payer: string, amount: Rand): string {
+  return `${payer.toUpperCase()} ${formatRand(amount)} DUE`;
+}
+
+/**
+ * The expected-money rules a state must keep (D35, F16), besides never
+ * going below zero: a paid bill has nothing still due, and every receipt
+ * of a carried amount still has its carry entry. Null when they hold.
+ */
+function dueProblem(cycle: Cycle): string | null {
+  for (const l of computeCycle(cycle).lines) {
+    if (l.paid && l.due > 0)
+      return `${l.line.expected!.payer.toUpperCase()} ${formatRand(l.due)} STILL DUE ON ${l.line.name.toUpperCase()}: RECEIVE IT FIRST`;
+  }
+  const carries = new Set(cycle.entries.flatMap((e) => (e.type === 'carry' ? [e.id] : [])));
+  for (const e of cycle.entries) {
+    if (e.type === 'receive' && e.carryId && !carries.has(e.carryId)) return 'IT WAS RECEIVED: DELETE THE RECEIPT FIRST';
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -237,10 +351,12 @@ const fail = (error: string): Result => ({ ok: false, error });
 
 /**
  * Puts `cycle` in place of the current cycle (and `chips`, if given), then
- * runs the never-below-zero check on the result.
+ * runs the expected-money rules and the never-below-zero check on the result.
  */
 function commit(ledger: Ledger, cycle: Cycle, chips: Ledger['chips'] = ledger.chips): Result {
   const next: Ledger = { ...ledger, cycles: [...ledger.cycles.slice(0, -1), cycle], chips };
+  const due = dueProblem(cycle);
+  if (due) return fail(due);
   const first = shortfalls(next)[0];
   return first ? fail(describeShortfall(first)) : { ok: true, ledger: next };
 }
@@ -321,6 +437,25 @@ function ordered<T extends { isFood: boolean; side: Side }>(lines: readonly T[])
   return [...lines].sort((a, b) => rank(a) - rank(b));
 }
 
+/**
+ * Checks a line's expected money (F15): debit bills only, a payer, and an
+ * amount above zero and at most the bill. Returns the cleaned value
+ * (undefined for none), or the refusal message.
+ */
+function cleanExpected(
+  expected: Expected | null | undefined,
+  line: { name: string; kind: LineKind; side: Side; amount: Rand },
+): { value: Expected | undefined } | { error: string } {
+  if (!expected) return { value: undefined };
+  if (line.kind !== 'bill' || line.side !== 'debit') return { error: 'COMING IN IS FOR DEBIT BILLS ONLY' };
+  const payer = cleanText(expected.payer);
+  if (payer === null) return { error: 'SAY WHO PAYS IT IN (UP TO 40 CHARACTERS)' };
+  if (!positive(expected.amount)) return { error: 'ENTER WHAT’S COMING IN (ABOVE R0)' };
+  if (expected.amount > line.amount)
+    return { error: `${cleanText(line.name)?.toUpperCase() ?? 'THE BILL'}: COMING IN CAN’T BE MORE THAN THE BILL` };
+  return { value: { payer, amount: expected.amount } };
+}
+
 // ---------------------------------------------------------------------------
 // F0: first run, mid-cycle
 // ---------------------------------------------------------------------------
@@ -337,6 +472,10 @@ export interface StartLineInput {
   leftNow: Rand;
   /** Bills: already paid this cycle (it then holds nothing back). Ignored for budgets. */
   paid: boolean;
+  /** Debit bills: money someone else pays in towards it (F15). Ignored on a paid bill. */
+  expected?: Expected | null;
+  /** That money has already arrived (F15 "ALREADY RECEIVED"): the actual debit balance includes it. */
+  expectedIn?: boolean;
 }
 
 /** The setup screen's answers (F0). */
@@ -355,7 +494,9 @@ export interface StartInput {
  * unpaid bill's amount; a paid bill holds nothing).
  */
 export function startSpare(input: Pick<StartInput, 'actualDebit' | 'actualCredit' | 'lines'>): Record<Side, number> {
-  const holds = (l: StartLineInput) => (l.kind === 'budget' ? l.leftNow : l.paid ? 0 : l.monthly);
+  // An unpaid bill holds back its amount, less money still to come in from someone else (D32).
+  const holds = (l: StartLineInput) =>
+    l.kind === 'budget' ? l.leftNow : l.paid ? 0 : l.monthly - (l.expected && !l.expectedIn ? l.expected.amount : 0);
   const held = (side: Side) => sum(input.lines.filter((l) => l.side === side).map(holds));
   return { credit: input.actualCredit - held('credit'), debit: input.actualDebit - held('debit') };
 }
@@ -367,19 +508,50 @@ export function start(ledger: Ledger, input: StartInput, ids: Ids): Result {
   if (dayDiff(ids.now, input.payDate) < 1) return fail('THE NEXT PAY DATE MUST BE AFTER TODAY');
   const problem = checkLines(input.lines);
   if (problem) return fail(problem);
+  const expectations = new Map<StartLineInput, Expected | undefined>();
   for (const l of input.lines) {
     if (!isRand(l.monthly) || (l.kind === 'budget' && !isRand(l.leftNow))) return fail(NOT_AN_AMOUNT);
     if (l.kind === 'budget' && l.leftNow > l.monthly)
       return fail(`${cleanText(l.name)!.toUpperCase()}: LEFT NOW CAN’T BE MORE THAN MONTHLY`);
+    // A bill already paid has nothing left to come in this cycle [P].
+    const expected = cleanExpected(l.kind === 'bill' && l.paid ? null : l.expected, { ...l, amount: l.monthly });
+    if ('error' in expected) return fail(expected.error);
+    expectations.set(l, expected.value);
   }
 
   const lines: Line[] = [];
   const paidBills: ID[] = [];
+  // Money that arrived before setup, per payer: received with nothing added (the balance has it).
+  const inBefore = new Map<string, ReceiveEntry>();
   for (const l of ordered(input.lines)) {
     const id = ids.newId();
     const amount = l.kind === 'budget' ? l.leftNow : l.monthly;
-    lines.push({ id, side: l.side, kind: l.kind, name: cleanText(l.name)!, isFood: l.isFood, amount, base: l.monthly });
+    const expected = expectations.get(l);
+    lines.push({
+      id,
+      side: l.side,
+      kind: l.kind,
+      name: cleanText(l.name)!,
+      isFood: l.isFood,
+      amount,
+      base: l.monthly,
+      ...(expected && { expected }),
+    });
     if (l.kind === 'bill' && l.paid) paidBills.push(id);
+    if (expected && l.expectedIn) {
+      const k = payerKey(expected.payer);
+      const r = inBefore.get(k) ?? {
+        id: '',
+        at: ids.now,
+        type: 'receive',
+        payer: expected.payer,
+        shares: [],
+        amount: 0,
+        beforeStart: true,
+      };
+      r.shares.push({ lineId: id, amount: expected.amount });
+      inBefore.set(k, r);
+    }
   }
   const entries: Entry[] = [
     {
@@ -392,6 +564,8 @@ export function start(ledger: Ledger, input: StartInput, ids: Ids): Result {
     },
     // Bills already paid this cycle: ticked with nothing deducted (the actual balances already reflect them).
     ...paidBills.map((lineId): Entry => ({ id: ids.newId(), at: ids.now, type: 'tick', lineId, paid: 0, beforeStart: true })),
+    // Expected money that had already arrived (F15).
+    ...[...inBefore.values()].map((r): Entry => ({ ...r, id: ids.newId() })),
   ];
   const cycle: Cycle = {
     id: ids.newId(),
@@ -417,7 +591,12 @@ export interface SalaryLineInput {
   side: Side;
   isFood: boolean;
   amount: Rand;
+  /** Debit bills: money someone else pays in towards it (F15); due again in the new cycle. */
+  expected?: Expected | null;
 }
+
+/** What to do with money still due when the salary is loaded (D37). */
+export type DueChoice = 'carry' | 'drop';
 
 /** The salary load's answers (F1). */
 export interface SalaryInput {
@@ -431,6 +610,11 @@ export interface SalaryInput {
   actualDebit: Rand;
   actualCredit: Rand;
   lines: SalaryLineInput[];
+  /**
+   * CARRY or DROP for each payer with money still due (D37), keyed by
+   * payerKey; every payer in `payerDues` of the current cycle needs one.
+   */
+  stillDue?: Record<string, DueChoice>;
 }
 
 /** The debit share: what's left of the salary after savings and credit (D1). Negative when they add up to more. */
@@ -440,12 +624,21 @@ export function debitShare(salary: Rand, savings: Rand, credit: Rand): number {
 
 /** RESET (F1 step 3): every line of the current cycle back at its template default. */
 export function templateLines(cycle: Cycle): SalaryLineInput[] {
-  return cycle.lines.map((l) => ({ id: l.id, name: l.name, kind: l.kind, side: l.side, isFood: l.isFood, amount: l.base }));
+  return cycle.lines.map((l) => ({
+    id: l.id,
+    name: l.name,
+    kind: l.kind,
+    side: l.side,
+    isFood: l.isFood,
+    amount: l.base,
+    ...(l.expected && { expected: l.expected }),
+  }));
 }
 
 /** What each side's spare would be after a salary load (F1's live preview; D16, D18). */
 export function salarySpare(input: Pick<SalaryInput, 'actualDebit' | 'actualCredit' | 'lines'>): Record<Side, number> {
-  const held = (side: Side) => sum(input.lines.filter((l) => l.side === side).map((l) => l.amount));
+  // A bill holds back its amount less what someone else still pays in (D32).
+  const held = (side: Side) => sum(input.lines.filter((l) => l.side === side).map((l) => l.amount - (l.expected?.amount ?? 0)));
   return { credit: input.actualCredit - held('credit'), debit: input.actualDebit - held('debit') };
 }
 
@@ -469,6 +662,19 @@ export function loadSalary(ledger: Ledger, input: SalaryInput, ids: Ids): Result
     if (seen.has(l.id)) return fail('A LINE IS LISTED TWICE');
     seen.add(l.id);
   }
+  const expectations = new Map<SalaryLineInput, Expected | undefined>();
+  for (const l of input.lines) {
+    const expected = cleanExpected(l.expected, l);
+    if ('error' in expected) return fail(expected.error);
+    expectations.set(l, expected.value);
+  }
+  // Money still due in the closing cycle: each payer is carried or dropped (D37).
+  const carries: CarryEntry[] = [];
+  for (const due of payerDues(current)) {
+    const choice = input.stillDue?.[due.key];
+    if (choice !== 'carry' && choice !== 'drop') return fail(`CHOOSE CARRY OR DROP FOR ${due.payer.toUpperCase()}`);
+    if (choice === 'carry') carries.push({ id: '', at: ids.now, type: 'carry', payer: due.payer, amount: due.amount });
+  }
 
   // Every line starts the cycle at its amount, which is also its new template default (D27).
   const lines: Line[] = ordered(input.lines).map((l) => ({
@@ -479,6 +685,7 @@ export function loadSalary(ledger: Ledger, input: SalaryInput, ids: Ids): Result
     isFood: l.isFood,
     amount: l.amount,
     base: l.amount,
+    ...(expectations.get(l) && { expected: expectations.get(l) }),
   }));
   const salary: Entry = {
     id: ids.newId(),
@@ -497,7 +704,7 @@ export function loadSalary(ledger: Ledger, input: SalaryInput, ids: Ids): Result
     payDate: startOfDay(input.payDate),
     closedAt: null,
     lines,
-    entries: [salary],
+    entries: [salary, ...carries.map((c): Entry => ({ ...c, id: ids.newId() }))],
   };
   return commit({ ...ledger, cycles: [...ledger.cycles.slice(0, -1), closed, next] }, next);
 }
@@ -613,7 +820,8 @@ export function lineHasEntries(cycle: Cycle, lineId: ID): boolean {
   return cycle.entries.some(
     (e) =>
       ((e.type === 'tick' || e.type === 'topup') && e.lineId === lineId) ||
-      (e.type === 'spend' && e.parts.some((p) => p.source === lineId)),
+      (e.type === 'spend' && e.parts.some((p) => p.source === lineId)) ||
+      (e.type === 'receive' && e.shares.some((sh) => sh.lineId === lineId)),
   );
 }
 
@@ -623,6 +831,8 @@ export interface LinePatch {
   amount?: Rand;
   kind?: LineKind;
   side?: Side;
+  /** Money someone else pays in (F15); null removes it. Locked once received this cycle. */
+  expected?: Expected | null;
 }
 
 /**
@@ -655,7 +865,12 @@ export function editLine(ledger: Ledger, lineId: ID, patch: LinePatch): Result {
     amount = patch.amount - topUps;
     base = patch.amount;
   }
-  const edited: Line = { ...line, name, kind, side, amount, base };
+  if (patch.expected !== undefined && computeCycle(cycle).lines.find((l) => l.line.id === lineId)!.received)
+    return fail('ALREADY RECEIVED: DELETE THE RECEIPT TO CHANGE WHAT’S COMING IN');
+  const expected = cleanExpected(patch.expected === undefined ? line.expected : patch.expected, { name, kind, side, amount });
+  if ('error' in expected) return fail(expected.error);
+  const { expected: _old, ...rest } = line;
+  const edited: Line = { ...rest, name, kind, side, amount, base, ...(expected.value && { expected: expected.value }) };
   // A line moved to the other side goes to the end of that side's lines.
   const others = cycle.lines.filter((l) => l.id !== lineId);
   const lines = side === line.side ? cycle.lines.map((l) => (l.id === lineId ? edited : l)) : ordered([...others, edited]);
@@ -668,6 +883,8 @@ export interface NewLineInput {
   kind: LineKind;
   side: Side;
   amount: Rand;
+  /** Debit bills: money someone else pays in towards it (F15). */
+  expected?: Expected | null;
 }
 
 /** F6: adds a line at the end of its side; its amount is held back from that side's spare. */
@@ -677,7 +894,18 @@ export function addLine(ledger: Ledger, input: NewLineInput, ids: Ids): Result {
   const name = cleanText(input.name);
   if (name === null) return fail('EVERY LINE NEEDS A NAME (UP TO 40 CHARACTERS)');
   if (!isRand(input.amount)) return fail(NOT_AN_AMOUNT);
-  const line: Line = { id: ids.newId(), side: input.side, kind: input.kind, name, isFood: false, amount: input.amount, base: input.amount };
+  const expected = cleanExpected(input.expected, { ...input, name });
+  if ('error' in expected) return fail(expected.error);
+  const line: Line = {
+    id: ids.newId(),
+    side: input.side,
+    kind: input.kind,
+    name,
+    isFood: false,
+    amount: input.amount,
+    base: input.amount,
+    ...(expected.value && { expected: expected.value }),
+  };
   return commit(ledger, { ...cycle, lines: ordered([...cycle.lines, line]) });
 }
 
@@ -741,6 +969,50 @@ export function income(ledger: Ledger, amount: Rand, label: string, ids: Ids, re
     withEntry(cycle, { id: edit?.id ?? ids.newId(), at: edit?.at ?? ids.now, type: 'income', amount, label: clean }, replacing),
     chips,
   );
+}
+
+// ---------------------------------------------------------------------------
+// F16: receive expected money
+// ---------------------------------------------------------------------------
+
+/**
+ * F16: records one payer's payment arriving in debit, covering a `Due` (its
+ * `key` from `dues`), or (with `replacing`) changes what arrived on an
+ * earlier receipt (F10; what it covers stays). `amount` is what actually
+ * arrived (D34): the difference from what was expected lands in spare debit,
+ * or comes out of it (refused when spare can't cover it, D3).
+ */
+export function receive(ledger: Ledger, key: string, amount: Rand, ids: Ids, replacing?: ID): Result {
+  const cycle = needCycle(ledger);
+  if (isResult(cycle)) return cycle;
+  const edit = editing(cycle, replacing, 'receive');
+  if (edit && 'ok' in edit) return edit;
+  if (!positive(amount)) return fail(MORE_THAN_ZERO);
+  let entry: ReceiveEntry;
+  if (edit) {
+    const old = cycle.entries.find((e): e is ReceiveEntry => e.id === replacing)!;
+    if (old.beforeStart) return fail('RECEIVED BEFORE SETUP: DELETE IT TO MAKE IT DUE AGAIN');
+    entry = { ...old, amount };
+  } else {
+    const due = dues(cycle).find((d) => d.key === key);
+    if (!due) return fail('NOTHING IS DUE FROM THEM NOW');
+    entry = {
+      id: ids.newId(),
+      at: ids.now,
+      type: 'receive',
+      payer: due.payer,
+      shares: due.shares,
+      ...(due.carryId && { carryId: due.carryId }),
+      amount,
+    };
+  }
+  return commit(ledger, withEntry(cycle, entry, replacing));
+}
+
+/** What a receipt was expected to bring (its shares, or the carried amount). */
+export function expectedOf(entry: ReceiveEntry, cycle: Cycle): Rand {
+  if (entry.carryId) return cycle.entries.find((e): e is CarryEntry => e.id === entry.carryId && e.type === 'carry')?.amount ?? 0;
+  return sum(entry.shares.map((sh) => sh.amount));
 }
 
 // ---------------------------------------------------------------------------

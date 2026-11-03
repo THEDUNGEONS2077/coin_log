@@ -6,6 +6,8 @@
  *   STEP 2/3 · BALANCES  the actual debit balance and credit available now
  *   STEP 3/3 · LINES     RESET (every line back at its default) or EDIT,
  *                        the spare that leaves, [ CONFIRM ]
+ *   STEP 4/4 · STILL DUE only when expected money hasn't arrived (D37):
+ *                        CARRY or DROP for each payer, [ CONFIRM ]
  *
  * Layer: UI (Expo Router screen). Opened from ⊕ SALARY or the red payday
  * line, at any time (also before the pay date). Nothing changes until
@@ -26,7 +28,7 @@ import { AmountField, DateField, FormButton, FormPage, Missing, Segmented, Spare
 import { anyProblem, draftsFrom, type LineDraft, toSalaryLines } from '@/components/lines/drafts';
 import { LinesEditor } from '@/components/lines/LinesEditor';
 import { addDays, addMonths, dayDiff, startOfDay } from '@/lib/dates';
-import { debitShare, salarySpare, type SalaryLineInput, sideLabel, SIDES, templateLines } from '@/lib/ledger';
+import { debitShare, type DueChoice, payerDues, salarySpare, type SalaryLineInput, sideLabel, SIDES, templateLines } from '@/lib/ledger';
 import { formatRand, parseRand } from '@/lib/money';
 import type { Ledger, SalaryEntry } from '@/lib/types';
 import { haptics } from '@/services/haptics';
@@ -42,6 +44,9 @@ interface Fields {
   actualCredit: string;
 }
 
+/** The steps of the page (4 only when something is still due). */
+type Step = 1 | 2 | 3 | 4;
+
 /** The newest salary entry in the ledger, if there's been one (for CREDIT's prefill). */
 function lastSalary(ledger: Ledger): SalaryEntry | null {
   for (let c = ledger.cycles.length - 1; c >= 0; c--) {
@@ -54,13 +59,19 @@ function lastSalary(ledger: Ledger): SalaryEntry | null {
 export default function LoadSalaryScreen() {
   const { ledger, cycle } = useBudget();
   if (!cycle) return <Missing title="load salary" what="Set coin_log up first: the salary load starts from your current budget." />;
-  return <LoadSalary ledger={ledger} template={templateLines(cycle)} />;
+  return <LoadSalary ledger={ledger} template={templateLines(cycle)} owing={payerDues(cycle)} />;
 }
 
-function LoadSalary({ ledger, template }: { ledger: Ledger; template: SalaryLineInput[] }) {
+/** One payer with money still due in the closing cycle (the STILL DUE step). */
+type Owing = ReturnType<typeof payerDues>[number];
+
+function LoadSalary({ ledger, template, owing }: { ledger: Ledger; template: SalaryLineInput[]; owing: Owing[] }) {
   const actions = useActions();
   const now = useMinute();
-  const [step, setStep] = useState<1 | 2 | 3>(1);
+  const [step, setStep] = useState<Step>(1);
+  // The STILL DUE step only appears when something is still due.
+  const steps = owing.length > 0 ? 4 : 3;
+  const [stillDue, setStillDue] = useState<Record<string, DueChoice>>({});
   const [fields, setFields] = useState<Fields>(() => ({
     salary: '',
     savings: '0',
@@ -77,7 +88,7 @@ function LoadSalary({ ledger, template }: { ledger: Ledger; template: SalaryLine
   const set = (patch: Partial<Fields>) => setFields((f) => ({ ...f, ...patch }));
 
   /** Moves to another step, clearing the last step's messages. */
-  const go = (to: 1 | 2 | 3) => {
+  const go = (to: Step) => {
     setTried(false);
     setError(null);
     setStep(to);
@@ -87,7 +98,7 @@ function LoadSalary({ ledger, template }: { ledger: Ledger; template: SalaryLine
   useEffect(() => {
     if (step === 1) return;
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
-      go(step === 3 ? 2 : 1);
+      go((step - 1) as Step);
       return true;
     });
     return () => sub.remove();
@@ -123,10 +134,19 @@ function LoadSalary({ ledger, template }: { ledger: Ledger; template: SalaryLine
     go(3);
   };
 
+  /** Step 3 → 4 (STILL DUE), once the edited lines can be used. */
+  const afterLines = () => {
+    setTried(true);
+    if (mode === 'edit' && anyProblem(drafts, 'salary')) return setError('FILL IN THE MARKED FIELDS');
+    go(4);
+  };
+
   /** CONFIRM: runs F1 with everything as entered. */
   const confirm = () => {
     setTried(true);
     if (mode === 'edit' && anyProblem(drafts, 'salary')) return setError('FILL IN THE MARKED FIELDS');
+    const undecided = owing.find((o) => !stillDue[o.key]);
+    if (undecided) return setError(`CHOOSE CARRY OR DROP FOR ${undecided.payer.toUpperCase()}`);
     const outcome = actions.loadSalary({
       receivedAt: received,
       salary: salary!,
@@ -136,6 +156,7 @@ function LoadSalary({ ledger, template }: { ledger: Ledger; template: SalaryLine
       actualDebit: actualDebit!,
       actualCredit: actualCredit!,
       lines,
+      stillDue,
     });
     if (outcome) return setError(outcome);
     haptics.success();
@@ -148,7 +169,7 @@ function LoadSalary({ ledger, template }: { ledger: Ledger; template: SalaryLine
     return (
       <FormPage
         {...close}
-        step="STEP 1/3 · AMOUNTS"
+        step={`STEP 1/${steps} · AMOUNTS`}
         intro="Savings come off the top. Type what went to credit; debit gets the rest."
         error={error}
         actions={<FormButton label={`NEXT ${glyphs.next.glyph}`} onPress={afterAmounts} primary grow accessibilityLabel="Next: balances" />}
@@ -188,7 +209,7 @@ function LoadSalary({ ledger, template }: { ledger: Ledger; template: SalaryLine
     return (
       <FormPage
         {...close}
-        step="STEP 2/3 · BALANCES"
+        step={`STEP 2/${steps} · BALANCES`}
         intro="Check your banking app now. Whatever is left from the last cycle is in these balances, so it becomes spare."
         error={error}
         actions={
@@ -216,16 +237,62 @@ function LoadSalary({ ledger, template }: { ledger: Ledger; template: SalaryLine
     );
   }
 
+  if (step === 4) {
+    return (
+      <FormPage
+        {...close}
+        step={`STEP 4/${steps} · STILL DUE`}
+        intro="This money hasn't come in. CARRY keeps it due in the new cycle (not tied to a bill: it goes to spare debit when it arrives). DROP forgets it."
+        error={error}
+        actions={
+          <>
+            <FormButton label={`${glyphs.back.glyph} BACK`} onPress={() => go(3)} grow accessibilityLabel="Back: lines" />
+            <FormButton label="CONFIRM" onPress={confirm} primary grow accessibilityLabel="Confirm: load the salary" />
+          </>
+        }
+      >
+        {owing.map((o) => (
+          <View key={o.key} style={styles.owing}>
+            <View style={styles.row}>
+              <Text style={[type.group, styles.bright, styles.grow]} numberOfLines={1} maxFontSizeMultiplier={maxFontSizeMultiplier}>
+                {o.payer.toUpperCase()}
+              </Text>
+              <Text style={[type.body, styles.accent]} maxFontSizeMultiplier={maxFontSizeMultiplier}>
+                {formatRand(o.amount)}
+              </Text>
+            </View>
+            <Segmented
+              options={[
+                { key: 'carry', label: 'CARRY', a11y: `Carry ${o.payer}'s ${formatRand(o.amount)} into the new cycle` },
+                { key: 'drop', label: 'DROP', a11y: `Drop ${o.payer}'s ${formatRand(o.amount)}` },
+              ]}
+              value={stillDue[o.key] ?? null}
+              onChange={(choice) => {
+                setError(null);
+                setStillDue((d) => ({ ...d, [o.key]: choice }));
+              }}
+              accessibilityLabel={`${o.payer}: still due`}
+            />
+          </View>
+        ))}
+      </FormPage>
+    );
+  }
+
   return (
     <FormPage
       {...close}
-      step="STEP 3/3 · LINES"
+      step={`STEP 3/${steps} · LINES`}
       intro="RESET puts every line back at its default amount. EDIT lets you change, remove or add lines first."
       error={error}
       actions={
         <>
           <FormButton label={`${glyphs.back.glyph} BACK`} onPress={() => go(2)} grow accessibilityLabel="Back: balances" />
-          <FormButton label="CONFIRM" onPress={confirm} primary grow accessibilityLabel="Confirm: load the salary" />
+          {steps === 4 ? (
+            <FormButton label={`NEXT ${glyphs.next.glyph}`} onPress={afterLines} primary grow accessibilityLabel="Next: still due" />
+          ) : (
+            <FormButton label="CONFIRM" onPress={confirm} primary grow accessibilityLabel="Confirm: load the salary" />
+          )}
         </>
       }
     >
@@ -271,6 +338,9 @@ function TemplateList({ lines }: { lines: SalaryLineInput[] }) {
                 <Text style={[type.body, styles.text, styles.grow]} numberOfLines={1} maxFontSizeMultiplier={maxFontSizeMultiplier}>
                   {l.name.toUpperCase()}
                   <Text style={[type.meta, styles.dim]}>{l.kind === 'bill' ? '  BILL' : ''}</Text>
+                  {l.expected && (
+                    <Text style={[type.meta, styles.dim]}>{`  ${l.expected.payer.toUpperCase()} ${formatRand(l.expected.amount)} IN`}</Text>
+                  )}
                 </Text>
                 <Text style={[type.body, styles.accent]} maxFontSizeMultiplier={maxFontSizeMultiplier}>
                   {formatRand(l.amount)}
@@ -290,6 +360,7 @@ function TemplateList({ lines }: { lines: SalaryLineInput[] }) {
 
 const styles = StyleSheet.create({
   template: { gap: space.lg },
+  owing: { gap: space.sm },
   side: { gap: space.xs },
   sideHead: { flexDirection: 'row', alignItems: 'center', gap: space.md, marginBottom: space.xs },
   row: { flexDirection: 'row', alignItems: 'center', gap: space.md, minHeight: space.xl + space.sm },

@@ -123,6 +123,8 @@ export interface AppStore {
   income(amount: Rand, label: string, replacing?: ID): Outcome;
   /** F14: sets savings to the real total; with `replacing`, changes an adjustment (F10). */
   setSavings(total: Rand, replacing?: ID): Outcome;
+  /** F16: receives one payer's expected money (`key` from lib/ledger.ts `dues`); with `replacing`, changes what arrived (F10). */
+  receive(key: string, amount: Rand, replacing?: ID): Outcome;
   /** F10: deletes an entry of the current cycle (its money goes back). */
   deleteEntry(entryId: ID): Outcome;
 
@@ -228,6 +230,8 @@ export function createAppStore(deps: StoreDeps) {
           commit(ledgerLib.income(get().ledger, amount, label, ids(), replacing), replacing ? 'SAVED' : 'CASH IN LOGGED'),
         setSavings: (total, replacing) =>
           commit(ledgerLib.setSavings(get().ledger, total, ids(), replacing), replacing ? 'SAVED' : 'SAVINGS SET'),
+        receive: (key, amount, replacing) =>
+          commit(ledgerLib.receive(get().ledger, key, amount, ids(), replacing), replacing ? 'SAVED' : 'RECEIVED'),
         deleteEntry: (entryId) => commit(ledgerLib.deleteEntry(get().ledger, entryId), 'DELETED'),
 
         addChip: (kind, label) => commit(ledgerLib.addChip(get().ledger, kind, label), null),

@@ -25,9 +25,16 @@ type Migration = (data: any) => any;
 
 /**
  * MIGRATIONS[n] upgrades data from version n to n + 1.
- * Version 1 is the first format, so there's nothing to migrate yet.
+ *
+ *   1 → 2  expected money (PLAN D32–D37): bills may carry `expected`, and
+ *          there are `receive` and `carry` entries. Both are additions, so
+ *          version 1 data is already valid version 2 data: the step only
+ *          stamps the version. (The bump keeps an older app, which doesn't
+ *          know the new entries, from opening and overwriting the data.)
  */
-export const MIGRATIONS: Record<number, Migration> = {};
+export const MIGRATIONS: Record<number, Migration> = {
+  1: (data) => data,
+};
 
 /** Thrown when saved data comes from a *newer* app version than this one. */
 export class FutureSchemaError extends Error {
@@ -97,6 +104,9 @@ export function assertValidLedger(s: unknown): asserts s is Ledger {
       check(line.kind === 'bill' || line.kind === 'budget', `line ${line.id} kind`);
       check(typeof line.name === 'string' && typeof line.isFood === 'boolean', `line ${line.id} name`);
       check(Number.isInteger(line.amount) && isRand(line.base), `line ${line.id} amounts`);
+      if (line.expected !== undefined) {
+        check(typeof line.expected?.payer === 'string' && isRand(line.expected.amount), `line ${line.id} expected`);
+      }
     }
     const entryIds = new Set<string>();
     cycle.entries.forEach((e: { id?: unknown; type?: unknown; at?: unknown }, j: number) => {
@@ -107,7 +117,7 @@ export function assertValidLedger(s: unknown): asserts s is Ledger {
       // Exactly one opening entry per cycle, and it comes first.
       check(opening === (j === 0), `cycle ${i} opening entry`);
       check(
-        ['start', 'salary', 'spend', 'tick', 'cancel', 'topup', 'income', 'move', 'adjust'].includes(e.type as string),
+        ['start', 'salary', 'spend', 'tick', 'cancel', 'topup', 'income', 'move', 'adjust', 'receive', 'carry'].includes(e.type as string),
         `entry ${e.id} type`,
       );
     });

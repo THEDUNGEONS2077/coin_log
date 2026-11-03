@@ -106,6 +106,27 @@ const SECTIONS: Section[] = [
     ],
   },
   {
+    title: 'MONEY COMING IN',
+    intro: 'For a bill someone else pays part of, like a partner’s half of the rent paid into your account.',
+    lines: [
+      {
+        key: 'COMING IN',
+        what: 'On a debit bill (add or edit it): tick COMING IN FROM SOMEONE ELSE, say who, and their share. Until it arrives, the bill only holds back your share.',
+      },
+      { key: 'One payer, many bills', what: 'Give the same name on each bill (rent and internet): one payment covers them all.' },
+      {
+        key: `${g.receive.glyph} … DUE`,
+        what: `Tap the tag under the bill, or pick it at the top of ${g.income.glyph} IN, when the money arrives. Spare debit stays the same: it was never counting on it.`,
+      },
+      { key: 'A different amount', what: 'Type what actually arrived: extra goes to spare debit, a shortfall comes out of it.' },
+      { key: 'Tick off', what: 'A bill with money still due can only be ticked off once it has been received.' },
+      {
+        key: 'Payday',
+        what: `If it still hasn’t arrived, the salary load asks: CARRY keeps it due in the new cycle (${g.carry.glyph} under DEBIT), DROP forgets it.`,
+      },
+    ],
+  },
+  {
     title: 'LOG TAB',
     intro: 'Every entry, newest first: this cycle on top, older cycles folded below.',
     lines: [

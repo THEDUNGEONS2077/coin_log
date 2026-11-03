@@ -7,7 +7,8 @@
  *
  * Layer: UI. The words come from lib/entries.ts. In the current cycle, an
  * entry other than a salary or start can be changed (F10):
- *   tap         opens its own form, filled in (a cancel can only be deleted)
+ *   tap         opens its own form, filled in (a cancel, or money carried
+ *               over from last cycle, can only be deleted)
  *   swipe ←     deletes it; its money goes back where it came from, with
  *               UNDO (refused, with the reason, if that would leave
  *               anything short)
@@ -42,6 +43,9 @@ function editPath(entry: Entry): string | null {
       return '/move';
     case 'adjust':
       return '/savings-set';
+    case 'receive':
+      // Received before setup: nothing to change; delete it to make the money due again.
+      return entry.beforeStart ? null : '/receive';
     default:
       return null;
   }

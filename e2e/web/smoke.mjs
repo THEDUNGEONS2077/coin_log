@@ -363,6 +363,100 @@ async function chipFlows(page) {
   await tap(page, 'Cancel');
 }
 
+/**
+ * D32–D37: expected money, from a saved version-1 budget (so the 1 → 2
+ * migration runs too): R20 000 debit, Rent R10 000 with Partner R5 000 coming
+ * in, Internet R800 with Partner R400. Spare debit 20 000 − 5 400 = R14 600.
+ */
+async function expectedFlows(browser) {
+  const day = 86_400_000;
+  const midnight = new Date();
+  midnight.setHours(0, 0, 0, 0);
+  const ledger = {
+    schemaVersion: 1,
+    cycles: [
+      {
+        id: 'c1',
+        startAt: midnight.getTime() - 5 * day,
+        payDate: midnight.getTime() + 20 * day,
+        closedAt: null,
+        lines: [
+          { id: 'food', side: 'credit', kind: 'budget', name: 'Food', isFood: true, amount: 1000, base: 1000 },
+          { id: 'rent', side: 'debit', kind: 'bill', name: 'Rent', isFood: false, amount: 10000, base: 10000, expected: { payer: 'Partner', amount: 5000 } },
+          { id: 'net', side: 'debit', kind: 'bill', name: 'Internet', isFood: false, amount: 800, base: 800, expected: { payer: 'Partner', amount: 400 } },
+        ],
+        entries: [{ id: 'e1', at: midnight.getTime() - 5 * day, type: 'start', actualDebit: 20000, actualCredit: 2000, savingsOnHand: 0 }],
+      },
+    ],
+    chips: { spend: [], income: [] },
+  };
+  const { page, errors } = await freshPage(browser, ledger);
+  let main = await text(page);
+  check(main.includes('R14\u00A0600') && main.includes('PARTNER R5\u00A0000 DUE'), 'a bill holds back only your share while theirs is due');
+  await page.screenshot({ path: join(shots, 'expected-due.png') });
+
+  // D35: the tick is blocked and offers RECEIVE.
+  await page.getByText('[ ]', { exact: true }).first().click();
+  await page.waitForTimeout(400);
+  check((await text(page)).includes('PARTNER R5\u00A0000 DUE ON RENT'), 'a bill with money due can’t be ticked off');
+  await tap(page, "Receive Partner's money");
+
+  // F16 / D34: R5 200 arrives instead of R5 400 (spare 14 600 → 14 400).
+  let form = await text(page);
+  check(form.includes('FROM PARTNER') && form.includes('INTERNET') && form.includes('R5\u00A0400'), 'RECEIVE lists every bill the payer covers');
+  await type(page, 'RECEIVED', '5200');
+  check((await text(page)).includes('R200 SHORT COMES FROM SPARE DEBIT'), 'a shortfall is previewed against spare debit');
+  await page.screenshot({ path: join(shots, 'expected-receive.png'), fullPage: true });
+  await tap(page, 'Received: it arrived in debit');
+  main = await text(page);
+  check(main.includes('RECEIVED') && main.includes('R14\u00A0400') && main.includes('PARTNER R5\u00A0000 RECEIVED'), 'receiving covers both bills');
+
+  // Now Rent can be ticked off.
+  await page.getByText('[ ]', { exact: true }).first().click();
+  await page.waitForTimeout(400);
+  await tap(page, 'Paid: tick it off');
+  check((await text(page)).includes('PAID R10\u00A0000'), 'once received, the bill can be ticked off');
+
+  // F15: a new debit bill with Partner's share (chip offered); spare 14 400 − 300 = 14 100.
+  await tap(page, 'Add a debit line');
+  await type(page, 'NAME', 'Water');
+  await page.getByLabel('Bill: a fixed amount, ticked off when paid', { exact: true }).click();
+  await type(page, 'BILL AMOUNT', '600');
+  await page.getByRole('checkbox', { name: 'Water: part of it is paid in by someone else' }).click();
+  await page.getByRole('radio', { name: 'Partner', exact: true }).click();
+  await type(page, 'Water, their share', '300');
+  check((await text(page)).includes('SPARE DEBIT R14\u00A0100'), 'COMING IN is held back from spare only as your share');
+  await tap(page, 'Add the line');
+  check((await text(page)).includes('PARTNER R300 DUE'), 'the new bill shows its money due');
+
+  // + IN lists what's due.
+  await tap(page, 'Log extra cash in');
+  check((await text(page)).includes('PARTNER R300 DUE'), '+ IN lists money still due');
+  await tap(page, 'Cancel');
+
+  // D37: the salary load asks CARRY or DROP (R300 still due from Partner).
+  await tap(page, 'Load salary');
+  check((await text(page)).includes('STEP 1/4 · AMOUNTS'), 'with money still due, the salary load has four steps');
+  await type(page, 'SALARY', '20000');
+  await type(page, 'TO CREDIT', '2000');
+  await tap(page, 'Next: balances');
+  await type(page, 'DEBIT BALANCE NOW', '15000');
+  await type(page, 'CREDIT AVAILABLE NOW', '2000');
+  await tap(page, 'Next: lines');
+  // RESET: 15 000 − (5 000 + 400 + 300) = 9 300.
+  check((await text(page)).includes('R9\u00A0300'), 'RESET keeps COMING IN, so only your shares are held back');
+  await tap(page, 'Next: still due');
+  await tap(page, 'Confirm: load the salary');
+  check((await text(page)).includes('CHOOSE CARRY OR DROP FOR PARTNER'), 'CONFIRM waits for CARRY or DROP');
+  await page.screenshot({ path: join(shots, 'salary-still-due.png'), fullPage: true });
+  await tap(page, "Carry Partner's R300 into the new cycle");
+  await tap(page, 'Confirm: load the salary');
+  main = await text(page);
+  check(main.includes('SALARY LOADED') && main.includes('STILL DUE FROM LAST CYCLE'), 'CARRY lists the money under DEBIT in the new cycle');
+  await page.screenshot({ path: join(shots, 'expected-carried.png'), fullPage: true });
+  check(errors.length === 0, `no page errors on the expected-money page${errors.length ? `: ${errors.join(' | ')}` : ''}`);
+}
+
 const browser = await chromium.launch();
 try {
   const { page, errors } = await freshPage(browser);
@@ -373,6 +467,7 @@ try {
   await chipFlows(page);
   check(errors.length === 0, `no page errors${errors.length ? `: ${errors.join(' | ')}` : ''}`);
   await paydayLine(browser);
+  await expectedFlows(browser);
 } finally {
   await browser.close();
 }

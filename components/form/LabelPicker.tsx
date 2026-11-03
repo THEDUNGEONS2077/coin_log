@@ -30,17 +30,29 @@ interface Props {
   problem?: string | null;
   /** The custom field's placeholder ("e.g. Restaurant"). */
   placeholder: string;
+  /** The field's name (default LABEL; COMING IN uses FROM). */
+  title?: string;
+  /** Under a typed value the chips don't have (default: it becomes a chip once logged); null for none. */
+  newHint?: string | null;
 }
 
 /** Chips to tap, and a field to type a label of one's own. */
-export function LabelPicker({ chips, value, onChange, problem, placeholder }: Props) {
+export function LabelPicker({
+  chips,
+  value,
+  onChange,
+  problem,
+  placeholder,
+  title = 'LABEL',
+  newHint = 'A NEW LABEL BECOMES A CHIP ONCE IT’S LOGGED',
+}: Props) {
   const chosen = value.trim().toLowerCase();
   const isNew = chosen !== '' && !chips.some((c) => c.toLowerCase() === chosen);
   return (
     <View style={styles.wrap}>
       {chips.length > 0 && (
-        <Labelled label="LABEL">
-          <View style={styles.chips} accessibilityRole="radiogroup" accessibilityLabel="Labels">
+        <Labelled label={title}>
+          <View style={styles.chips} accessibilityRole="radiogroup" accessibilityLabel={title === 'LABEL' ? 'Labels' : title}>
             {chips.map((c) => {
               const on = c.toLowerCase() === chosen;
               return (
@@ -67,13 +79,13 @@ export function LabelPicker({ chips, value, onChange, problem, placeholder }: Pr
         </Labelled>
       )}
       <TextField
-        label={chips.length > 0 ? 'OR TYPE ONE' : 'LABEL'}
+        label={chips.length > 0 ? 'OR TYPE ONE' : title}
         value={value}
         onChange={onChange}
         placeholder={placeholder}
         problem={problem}
-        hint={isNew ? 'A NEW LABEL BECOMES A CHIP ONCE IT’S LOGGED' : undefined}
-        accessibilityLabel="Label"
+        hint={isNew && newHint ? newHint : undefined}
+        accessibilityLabel={title === 'LABEL' ? 'Label' : title}
       />
     </View>
   );

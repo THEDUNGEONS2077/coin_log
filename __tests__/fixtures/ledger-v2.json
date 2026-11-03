@@ -1,0 +1,159 @@
+{
+  "schemaVersion": 2,
+  "cycles": [
+    {
+      "id": "id5",
+      "startAt": 1793664000000,
+      "payDate": 1795564800000,
+      "closedAt": 1795600800000,
+      "lines": [
+        {
+          "id": "id1",
+          "side": "credit",
+          "kind": "budget",
+          "name": "Food",
+          "isFood": true,
+          "amount": 1800,
+          "base": 1800
+        },
+        {
+          "id": "id2",
+          "side": "debit",
+          "kind": "bill",
+          "name": "Rent",
+          "isFood": false,
+          "amount": 10000,
+          "base": 10000,
+          "expected": {
+            "payer": "Partner",
+            "amount": 5000
+          }
+        },
+        {
+          "id": "id3",
+          "side": "debit",
+          "kind": "bill",
+          "name": "Internet",
+          "isFood": false,
+          "amount": 800,
+          "base": 800,
+          "expected": {
+            "payer": "Partner",
+            "amount": 400
+          }
+        }
+      ],
+      "entries": [
+        {
+          "id": "id4",
+          "at": 1793707200000,
+          "type": "start",
+          "actualDebit": 20000,
+          "actualCredit": 2000,
+          "savingsOnHand": 5000
+        }
+      ]
+    },
+    {
+      "id": "id7",
+      "startAt": 1795564800000,
+      "payDate": 1798070400000,
+      "closedAt": null,
+      "lines": [
+        {
+          "id": "id1",
+          "side": "credit",
+          "kind": "budget",
+          "name": "Food",
+          "isFood": true,
+          "amount": 1800,
+          "base": 1800
+        },
+        {
+          "id": "id2",
+          "side": "debit",
+          "kind": "bill",
+          "name": "Rent",
+          "isFood": false,
+          "amount": 10000,
+          "base": 10000,
+          "expected": {
+            "payer": "Partner",
+            "amount": 5000
+          }
+        },
+        {
+          "id": "id3",
+          "side": "debit",
+          "kind": "bill",
+          "name": "Internet",
+          "isFood": false,
+          "amount": 800,
+          "base": 800,
+          "expected": {
+            "payer": "Partner",
+            "amount": 400
+          }
+        }
+      ],
+      "entries": [
+        {
+          "id": "id6",
+          "at": 1795600800000,
+          "type": "salary",
+          "salary": 25000,
+          "savings": 2000,
+          "credit": 2000,
+          "actualDebit": 21000,
+          "actualCredit": 2000
+        },
+        {
+          "id": "id8",
+          "at": 1795600800000,
+          "type": "carry",
+          "payer": "Partner",
+          "amount": 5400
+        },
+        {
+          "id": "id9",
+          "at": 1795888800000,
+          "type": "receive",
+          "payer": "Partner",
+          "shares": [
+            {
+              "lineId": "id2",
+              "amount": 5000
+            },
+            {
+              "lineId": "id3",
+              "amount": 400
+            }
+          ],
+          "amount": 5400
+        },
+        {
+          "id": "id10",
+          "at": 1795950000000,
+          "type": "spend",
+          "side": "credit",
+          "total": 150,
+          "label": "Groceries",
+          "parts": [
+            {
+              "source": "id1",
+              "amount": 100
+            },
+            {
+              "source": "spare",
+              "amount": 50
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "chips": {
+    "spend": ["Groceries"],
+    "income": []
+  }
+}

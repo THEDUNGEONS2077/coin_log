@@ -10,7 +10,7 @@
  */
 
 /** Data format version, for migrations (store/migrations). */
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 /** An amount in whole rand. Stored amounts are integers ≥ 0 unless a field says otherwise. */
 export type Rand = number;
@@ -48,6 +48,27 @@ export interface Line {
    * (PLAN D19). Editing the line's amount sets it too (D27); a top-up doesn't.
    */
   base: Rand;
+  /**
+   * Debit bills only (PLAN D32): part of the bill that someone else pays in
+   * (a partner's half of the rent). Until it's received the bill holds back
+   * only `amount − expected.amount`; once received, its full amount. Part of
+   * the template, so it's due again every cycle.
+   */
+  expected?: Expected;
+}
+
+/** Money expected from someone else towards a bill (PLAN D32). */
+export interface Expected {
+  /** Who pays it in, as typed ("Partner"). Bills with the same payer are received together (D33). */
+  payer: string;
+  /** Above zero and at most the bill's amount. */
+  amount: Rand;
+}
+
+/** One bill's share of a receipt (PLAN F16): what was expected on it. */
+export interface Share {
+  lineId: ID;
+  amount: Rand;
 }
 
 /** One source a transaction draws from (PLAN D10): a budget line, or the side's spare. */
@@ -154,8 +175,53 @@ export interface AdjustEntry extends EntryBase {
   setTo: Rand;
 }
 
+/**
+ * Expected money received (PLAN F16): one payer's payment, into debit. It
+ * covers that payer's bill shares (`shares`), or money carried over from
+ * last cycle (`carryId`). What arrived may differ from what was expected
+ * (D34): the difference lands in (or comes out of) spare debit.
+ */
+export interface ReceiveEntry extends EntryBase {
+  type: 'receive';
+  /** As shown ("Partner"). */
+  payer: string;
+  /** The bill shares it covers (empty for a carried amount). */
+  shares: Share[];
+  /** The carry entry it settles, for money carried over from last cycle. */
+  carryId?: ID;
+  /** What actually arrived. */
+  amount: Rand;
+  /**
+   * Received before coin_log was set up (F15 "ALREADY RECEIVED"): the actual
+   * balances already include it, so `amount` is 0 and nothing is added.
+   */
+  beforeStart?: boolean;
+}
+
+/**
+ * Expected money still due when the salary was loaded, carried into the new
+ * cycle (PLAN D37 CARRY). Not tied to a bill: it holds nothing back, and
+ * receiving it adds to spare debit.
+ */
+export interface CarryEntry extends EntryBase {
+  type: 'carry';
+  payer: string;
+  amount: Rand;
+}
+
 /** One log entry: every money movement in a cycle (PLAN §2). */
-export type Entry = StartEntry | SalaryEntry | SpendEntry | TickEntry | CancelEntry | TopUpEntry | IncomeEntry | MoveEntry | AdjustEntry;
+export type Entry =
+  | StartEntry
+  | SalaryEntry
+  | SpendEntry
+  | TickEntry
+  | CancelEntry
+  | TopUpEntry
+  | IncomeEntry
+  | MoveEntry
+  | AdjustEntry
+  | ReceiveEntry
+  | CarryEntry;
 
 /** One pay cycle, from a salary (or the first-run start) to the next. */
 export interface Cycle {

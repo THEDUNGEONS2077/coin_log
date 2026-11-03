@@ -12,3 +12,4 @@ export { SparePreview } from './SparePreview';
 export { Missing } from './Missing';
 export { Preview } from './Preview';
 export { LabelPicker } from './LabelPicker';
+export { ExpectedFields } from './ExpectedFields';

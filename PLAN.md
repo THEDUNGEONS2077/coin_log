@@ -42,6 +42,13 @@ coin_log is an offline Android budgeting app based on the concept in `C:\Users\5
 | D28 | Whole rand only, stored as integers, shown as `R1 234` |
 | D30 | Every entry in the current cycle can be edited or deleted, except a salary load (UNDO toast only). Deleting a tick-off reopens the bill. Past cycles are read-only |
 | D31 | Kept: boot sequence, backup/import with snapshots, Help, What's new, haptics. Dropped: Trash, notifications, Markdown sync, search, quick actions, XP |
+| D32 | (0.4.0) A debit bill can carry **expected money** from a named payer (e.g. Partner R5 000 on Rent R10 000). Until it's received the bill holds back only `amount − expected`; receiving it adds to debit and the bill then holds back its full amount, so spare debit doesn't change |
+| D33 | Expected money is grouped by **payer** (ignoring case and spacing): one payment covers all that payer's bill shares (Partner: Rent R5 000 + Internet R400 = R5 400) |
+| D34 | You type what actually arrived: extra goes to spare debit, a shortfall comes out of spare debit (blocked if spare can't cover it, D3) |
+| D35 | A bill with money still due **can't be ticked off** until that money is received |
+| D36 | Receive from the `↓ PARTNER R5 400 DUE` tag on the bill row, or from + IN, which lists what's due at the top |
+| D37 | At salary load, money still due is listed per payer with **CARRY** / **DROP** (no default; CONFIRM waits for a choice) |
+| D38 | Money that isn't tied to a bill (the cell allowance) is logged with + IN when it lands. Card deductions (interest, fees, budget-facility payments) are a plain debit bill such as `Card settlement`, ticked off at the actual amount when they're settled; no new feature |
 | — | Salary-load math: **spare debit = actual debit − Σ debit lines; spare credit = actual credit − Σ credit lines (incl. Food); savings += savings amount.** CONFIRM is blocked while either spare is below zero. First run = a mid-cycle START (F0): savings on hand, the actual balances, next pay date, and lines with monthly and left-now amounts. No salary needed. Public repo THEDUNGEONS2077/coin_log, app ID `com.thedungeons2077.coinlog` (`.dev`, `.e2e`) |
 
 ---
@@ -228,6 +235,31 @@ The top panel shows `{daysLeft} DAYS TO PAYDAY` (`PAYDAY TODAY` / `PAYDAY PASSED
 
 ---
 
+### F15 Expected money on a bill (0.4.0; line page add/edit, Setup, salary-load EDIT)
+- Debit bills only get a `[ ] COMING IN FROM SOMEONE ELSE` box. Ticked, it asks FROM (payer; payers already named are offered as chips) and THEIR SHARE (> R0, ≤ the bill amount).
+- It's part of the template: RESET at the salary load makes it due again each cycle.
+- Setup (mid-cycle) adds `[ ] ALREADY RECEIVED`: recorded as a receipt of R0 marked "received before setup" (the balance already has it). A bill marked ALREADY PAID has no expected money [P].
+- While it's due, the share can be changed or removed; spare changes to match (blocked if short). Removing it is how you pay the whole bill yourself [P]. Once received, it's locked: delete the receipt first.
+- A line moved off debit or made a budget loses it (the form hides the box; the builder refuses it).
+
+### F16 Receive (`/receive?key=…`, or `?entry=…` to change one)
+- Shows the payer, each bill share it covers, EXPECTED (the total), and RECEIVED (prefilled with EXPECTED). The preview shows any difference against spare debit.
+- RECEIVED → a `receive {payer, shares, carryId?, amount}` entry; toast `RECEIVED · UNDO`.
+- LOG: `↓ FROM PARTNER +R5 400 DB · RENT R5 000 · INTERNET R400` (`· EXPECTED R x` when a different amount arrived).
+- Changing it changes the amount only; what it covers stays. Deleting it makes the money due again. Both refused if a bill it covers is already ticked off (D35) or spare would go short.
+
+### F17 Ticking a bill with money due
+- The tick page shows `PARTNER R5 000 DUE ON RENT` and a RECEIVE button instead of PAID. The builder refuses it too (`PARTNER R5 000 STILL DUE ON RENT: RECEIVE IT FIRST`).
+
+### F18 Cancelling a bill with money due
+- Only your share returns to spare, and its share drops out of the payer's due. Once received, the whole bill amount returns to spare (the received money stays).
+
+### F1 addition: STILL DUE (step 4 of 4, only when something is due)
+- Each payer with money still due (bill shares plus earlier carried amounts, together) shows `PARTNER R5 400 [CARRY] [DROP]`.
+- CARRY → a `carry {payer, amount}` entry in the new cycle: listed under DEBIT as `⋯ PARTNER · STILL DUE FROM LAST CYCLE ↓ R5 400` and in + IN, separate from this cycle's shares. It holds nothing back; receiving it adds to spare debit.
+- DROP → gone; if it turns up later, use + IN.
+- A carried amount can be deleted on LOG (dropping it after all), but not after it's been received (delete the receipt first). It can't be edited.
+
 ### F14 Savings SET BALANCE (SAVINGS tab → `[ SET BALANCE ]`)
 1. Type the real savings total (≥ 0).
 2. Append `adjust {delta = new − current, setTo}` and log it as `ADJUST +R x / −R x`. Toast `SAVINGS SET · UNDO`.
@@ -346,3 +378,6 @@ Start from a copy of quest_log's infrastructure in a new repo, `~/projects/coin_
 - **SAVINGS history [P]** lists every entry that changed savings, across all cycles, showing what each did to savings. Rows from the current cycle can be changed or deleted, as on LOG.
 - **CHIPS [P]** (Settings): both label lists, each chip opening a page to rename or remove it, and "Add a label…". Logged entries keep their labels.
 - **A swipe is never also a tap [P]**: the release of a swipe on a row doesn't count as tapping it.
+- **Schema 2 (0.4.0)**: `Line.expected?`, `receive` and `carry` entries. The 1 → 2 migration only stamps the version (everything is an addition); the bump keeps an older app from opening and overwriting newer data. Fixture `__tests__/fixtures/ledger-v2.json`.
+- **Expected money, receive R0 [P]** isn't allowed: if nothing came, leave it due (CARRY or DROP at payday).
+- **A blocked tick explains the way out [P]**: "To pay all of it yourself instead, edit the bill and untick COMING IN" (that also changes the template, D27).

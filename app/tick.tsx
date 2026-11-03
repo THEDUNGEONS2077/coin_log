@@ -11,6 +11,9 @@
  * or `entry` (change that tick, from LOG). PAID starts at the bill's amount
  * (D7: always confirmed); paying less sends the rest back to spare, paying
  * more takes the extra from spare (refused if spare can't cover it, D3).
+ *
+ * A bill with someone else's share still due can't be ticked off (D35):
+ * the page says so and offers RECEIVE instead.
  */
 import { router, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
@@ -18,7 +21,7 @@ import { StyleSheet, Text } from 'react-native';
 
 import { useMinute } from '@/components/common/useMinute';
 import { AmountField, FormButton, FormPage, Missing, Preview } from '@/components/form';
-import { sideLabel, tickBill } from '@/lib/ledger';
+import { describeDue, payerKey, sideLabel, tickBill } from '@/lib/ledger';
 import { formatRand, parseRand } from '@/lib/money';
 import type { TickEntry } from '@/lib/types';
 import { haptics } from '@/services/haptics';
@@ -35,6 +38,29 @@ export default function TickScreen() {
     return <Missing title="tick off" what="That bill isn't in this cycle any more." />;
   }
   if (!entry && lineState.paid) return <Missing title="tick off" what={`${lineState.line.name.toUpperCase()} is already paid.`} />;
+  if (!entry && lineState.due > 0 && lineState.line.expected) {
+    const { payer } = lineState.line.expected;
+    return (
+      <FormPage
+        title="tick off"
+        closeLabel="Cancel"
+        intro={`${lineState.line.name} can be ticked off once ${payer}'s share has come in. To pay all of it yourself instead, edit the bill and untick COMING IN.`}
+        actions={
+          <FormButton
+            label="RECEIVE"
+            onPress={() => router.replace({ pathname: '/receive', params: { key: `bills:${payerKey(payer)}` } })}
+            primary
+            grow
+            accessibilityLabel={`Receive ${payer}'s money`}
+          />
+        }
+      >
+        <Text style={[type.group, styles.bright]} maxFontSizeMultiplier={maxFontSizeMultiplier}>
+          {`${describeDue(payer, lineState.due)} ON ${lineState.line.name.toUpperCase()}`}
+        </Text>
+      </FormPage>
+    );
+  }
   return <TickForm lineId={lineState.line.id} entry={entry} />;
 }
 

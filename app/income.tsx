@@ -3,6 +3,8 @@
  * (F10).
  *
  *   > cash in
+ *   DUE ━━━━━━━──────                   ← expected money still due (F16, D36)
+ *   [ ↓ PARTNER R5 400 DUE ]            ← tap: receive it instead
  *   AMOUNT  R [500]
  *   LABEL   [REFUND] [SIDE INCOME] …  or type one
  *   AFTER THIS: SPARE DEBIT R1 500
@@ -12,17 +14,24 @@
  * The money goes to debit's spare (D13); from there it can be moved to
  * credit or savings (MOVE). A typed label becomes an income chip once it's
  * logged [P, like spend labels].
+ *
+ * Money someone else pays in towards a bill (or carried over from last
+ * cycle) is listed first: tapping one opens RECEIVE for it (D36), which
+ * covers those bills, rather than logging it as extra cash.
  */
 import { router, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { Rule } from '@/components/common/Rule';
 import { useMinute } from '@/components/common/useMinute';
 import { AmountField, FormButton, FormPage, LabelPicker, Missing, Preview } from '@/components/form';
-import { income } from '@/lib/ledger';
+import { describeDue, dues, income } from '@/lib/ledger';
 import { formatRand, parseRand } from '@/lib/money';
 import type { IncomeEntry } from '@/lib/types';
 import { haptics } from '@/services/haptics';
 import { budgetOf, useActions, useAppStore, useBudget } from '@/store/react';
+import { colors, glyphs, maxFontSizeMultiplier, platformText, shape, size, space, type } from '@/theme';
 
 export default function IncomeScreen() {
   const params = useLocalSearchParams<{ entry?: string }>();
@@ -35,7 +44,9 @@ export default function IncomeScreen() {
 
 function IncomeForm({ entry }: { entry?: IncomeEntry }) {
   const actions = useActions();
-  const { ledger } = useBudget();
+  const { ledger, cycle } = useBudget();
+  // Only a new cash in offers what's due; a change to one is just that.
+  const due = entry || !cycle ? [] : dues(cycle);
   const chips = useAppStore((s) => s.ledger.chips.income);
   const now = useMinute();
   const [amountText, setAmountText] = useState(entry ? String(entry.amount) : '');
@@ -68,6 +79,29 @@ function IncomeForm({ entry }: { entry?: IncomeEntry }) {
         <FormButton label={entry ? 'SAVE' : 'LOG'} onPress={confirm} primary grow accessibilityLabel={entry ? 'Save' : 'Log the cash in'} />
       }
     >
+      {due.length > 0 && (
+        <View style={styles.due}>
+          <View style={styles.head}>
+            <Text style={[type.meta, styles.dim]} maxFontSizeMultiplier={maxFontSizeMultiplier}>
+              DUE: TAP ONE IF IT ARRIVED
+            </Text>
+            <Rule />
+          </View>
+          {due.map((d) => (
+            <Pressable
+              key={d.key}
+              onPress={() => router.replace({ pathname: '/receive', params: { key: d.key } })}
+              style={({ pressed }) => [styles.chip, pressed && styles.chipPressed]}
+              accessibilityRole="button"
+              accessibilityLabel={`Receive ${d.payer}, ${formatRand(d.amount)}${d.carryId ? ', from last cycle' : ''}`}
+            >
+              <Text style={[type.body, styles.accent]} maxFontSizeMultiplier={maxFontSizeMultiplier}>
+                {`${glyphs.receive.glyph} ${describeDue(d.payer, d.amount)}${d.carryId ? ' · LAST CYCLE' : ''}`}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+      )}
       <AmountField
         label="AMOUNT"
         value={amountText}
@@ -89,3 +123,19 @@ function IncomeForm({ entry }: { entry?: IncomeEntry }) {
     </FormPage>
   );
 }
+
+const styles = StyleSheet.create({
+  due: { gap: space.sm },
+  head: { flexDirection: 'row', alignItems: 'center', gap: space.md },
+  chip: {
+    minHeight: size.hitTarget,
+    paddingHorizontal: space.md,
+    justifyContent: 'center',
+    borderWidth: shape.hairline,
+    borderColor: colors.lineLit,
+    borderRadius: shape.radius,
+  },
+  chipPressed: { backgroundColor: colors.surface, borderColor: colors.accent },
+  accent: { color: colors.accent, ...platformText },
+  dim: { color: colors.textDim, ...platformText },
+});

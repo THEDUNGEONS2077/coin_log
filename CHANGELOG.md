@@ -1,5 +1,15 @@
 The changes in each coin_log version, newest first. The latest six show in the app (Settings → HELP → What's new).
 
+## 0.4.0 (build 4)
+
+Money coming in from someone else towards a bill, like a partner's half of the rent.
+
+- **COMING IN on a debit bill.** Edit (or add) a debit bill, tick COMING IN FROM SOMEONE ELSE, and say who pays in how much. Until it arrives, the bill holds back only your share, so spare debit shows what's really yours.
+- **One payer, many bills.** Use the same name on rent and internet: one payment covers both.
+- **↓ Receive it.** Tap `↓ PARTNER R5 400 DUE` under the bill, or pick it at the top of + IN. Spare debit stays the same; if a different amount arrived, type it: extra goes to spare, a shortfall comes out of it.
+- **Tick off after it's in.** A bill with money still due can be ticked off once it's received.
+- **Payday asks.** If it still hasn't arrived when you load your salary, choose CARRY (it stays due in the new cycle, under DEBIT) or DROP.
+
 ## 0.3.0 (build 3)
 
 Every flow in the plan: logging money, the LOG and SAVINGS tabs, and chips.

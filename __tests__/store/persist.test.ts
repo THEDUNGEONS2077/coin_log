@@ -6,7 +6,7 @@
  * unreadable data is kept under `corrupt.*` and the newest good snapshot is
  * loaded instead, and writes are throttled into one trailing write.
  */
-import { computeCycle, currentCycle, emptyLedger, savingsTotal } from '@/lib/ledger';
+import { computeCycle, currentCycle, dues, emptyLedger, savingsTotal } from '@/lib/ledger';
 import { SCHEMA_VERSION } from '@/lib/types';
 import { createMemoryKV, KEYS } from '@/store/kv';
 import { assertValidLedger, FutureSchemaError, migrate, MIGRATIONS } from '@/store/migrations';
@@ -21,6 +21,7 @@ import {
 } from '@/store/persist';
 
 import fixtureV1 from '../fixtures/ledger-v1.json';
+import fixtureV2 from '../fixtures/ledger-v2.json';
 
 const NOW = new Date(2026, 9, 27, 12).getTime();
 /** The fixture as a fresh object (tests mutate copies). */
@@ -38,6 +39,18 @@ describe('migrations', () => {
     expect(computeCycle(currentCycle(ledger)!).spare).toEqual({ credit: 1400, debit: 9500 });
     // 8000 on hand + 3000 from the salary + 1000 moved + 250 adjusted.
     expect(savingsTotal(ledger)).toBe(12250);
+  });
+
+  it('loads the v2 fixture (expected money, a receipt, a carried amount), numbers intact', () => {
+    const { ledger, migrated } = migrate(JSON.parse(JSON.stringify(fixtureV2)));
+    expect(migrated).toBe(false);
+    const cycle = currentCycle(ledger)!;
+    // Debit 21000 + Partner's 5400 − Rent 10000 − Internet 800 (both received) = 15600.
+    // Credit 2000 − Food's 1700 left − 150 spent = 150.
+    expect(computeCycle(cycle).spare).toEqual({ credit: 150, debit: 15600 });
+    // Last cycle's 5400 was carried and hasn't arrived.
+    expect(dues(cycle).map((d) => [d.payer, d.amount])).toEqual([['Partner', 5400]]);
+    expect(savingsTotal(ledger)).toBe(7000);
   });
 
   it('refuses data from a newer app version', () => {
