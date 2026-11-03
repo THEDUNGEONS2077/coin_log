@@ -48,7 +48,11 @@ coin_log is an offline Android budgeting app based on the concept in `C:\Users\5
 | D35 | A bill with money still due **can't be ticked off** until that money is received |
 | D36 | Receive from the `↓ PARTNER R5 400 DUE` tag on the bill row, or from + IN, which lists what's due at the top |
 | D37 | At salary load, money still due is listed per payer with **CARRY** / **DROP** (no default; CONFIRM waits for a choice) |
-| D38 | Money that isn't tied to a bill (the cell allowance) is logged with + IN when it lands. Card deductions (interest, fees, budget-facility payments) are a plain debit bill such as `Card settlement`, ticked off at the actual amount when they're settled; no new feature |
+| D38 | Money that isn't tied to a bill (the cell allowance) is logged with + IN when it lands. Card deductions were first a plain debit bill; replaced in 0.5.0 by D39–D42 |
+| D39 | (0.5.0) A debit bill can be marked **PAYS THE CARD** (Card settlement). **DEDUCTED** amounts lower credit, but they're owed back to the card until it's settled, so spare credit doesn't change: spare credit = balance − credit lines + owed |
+| D40 | Each deduction is logged as it appears (INTEREST, FEES, FACILITY) |
+| D41 | **SETTLE** (ticking the bill off) is prefilled with the total deducted and can be changed: debit pays it into credit and nothing is owed. More than deducted adds the extra to spare credit; less takes the gap from spare credit (blocked if short) |
+| D42 | Deductions not settled at the salary load carry over by themselves, as a one-off card settlement in the new cycle |
 | — | Salary-load math: **spare debit = actual debit − Σ debit lines; spare credit = actual credit − Σ credit lines (incl. Food); savings += savings amount.** CONFIRM is blocked while either spare is below zero. First run = a mid-cycle START (F0): savings on hand, the actual balances, next pay date, and lines with monthly and left-now amounts. No salary needed. Public repo THEDUNGEONS2077/coin_log, app ID `com.thedungeons2077.coinlog` (`.dev`, `.e2e`) |
 
 ---
@@ -260,6 +264,29 @@ The top panel shows `{daysLeft} DAYS TO PAYDAY` (`PAYDAY TODAY` / `PAYDAY PASSED
 - DROP → gone; if it turns up later, use + IN.
 - A carried amount can be deleted on LOG (dropping it after all), but not after it's been received (delete the receipt first). It can't be edited.
 
+### F19 PAYS THE CARD (0.5.0; line page add/edit, Setup, salary-load EDIT)
+- Debit bills get `[ ] PAYS THE CARD`. One bill per cycle [P] (a carried one besides), never together with COMING IN [P].
+- Fixed once it has deductions (delete them to turn it off) [P].
+- Setup adds ALREADY DEDUCTED R[ ]: deductions before setup, in the balance already. Recorded as a deduction marked "before setup" that changes no balance, only what's owed [P].
+
+### F20 DEDUCTED (`⊖ DEDUCTED` under the bill, or its ≡ menu → `/deduct`)
+- AMOUNT (> R0) and an optional LABEL (default "Card deduction"; labels used before are chips [P]).
+- Credit −amount; owed +amount; spare credit unchanged.
+- The bill holds back the larger of its amount and what's been deducted [P], so deductions past what was set aside come out of spare debit as they're logged (blocked if short).
+- LOG: `⊖ INTEREST −R380 CR · CARD DEDUCTION · CARD SETTLEMENT`. Editable and deletable until the bill is settled; then locked (delete the settlement first) [P].
+- Once settled, DEDUCTED isn't offered for the rest of the cycle; a later charge is a + LOG credit transaction, or delete the settlement, add it, settle again [P].
+
+### F21 SETTLE (`[ ]` on the bill, or swipe right → the tick page as `settle card`)
+- PAID TO THE CARD, prefilled with the total deducted. Debit −paid, credit +paid; owed → 0; the bill stops holding back.
+- LOG: `✓ SETTLED CARD SETTLEMENT −R1 180 DB · TO CREDIT · DEDUCTED R1 180`. Deleting it reopens the bill, and the deductions are owed again.
+
+### F22 Cancelling it
+- Blocked while it has deductions: settle it or delete them first [P]. Swipe-left isn't offered then.
+
+### F1 addition: card carry-over (D42)
+- Step 3 shows `CARD: R x STILL TO SETTLE · CARRIED INTO THE NEW CYCLE`, and its spare preview holds R x back on debit and adds it back on credit.
+- The new cycle gets `<name> (last cycle)`: a PAYS THE CARD bill of R x, marked carried (not in the template), with a deduction of R x marked "owed from last cycle" that changes no balance. It's settled like any card settlement.
+
 ### F14 Savings SET BALANCE (SAVINGS tab → `[ SET BALANCE ]`)
 1. Type the real savings total (≥ 0).
 2. Append `adjust {delta = new − current, setTo}` and log it as `ADJUST +R x / −R x`. Toast `SAVINGS SET · UNDO`.
@@ -380,4 +407,5 @@ Start from a copy of quest_log's infrastructure in a new repo, `~/projects/coin_
 - **A swipe is never also a tap [P]**: the release of a swipe on a row doesn't count as tapping it.
 - **Schema 2 (0.4.0)**: `Line.expected?`, `receive` and `carry` entries. The 1 → 2 migration only stamps the version (everything is an addition); the bump keeps an older app from opening and overwriting newer data. Fixture `__tests__/fixtures/ledger-v2.json`.
 - **Expected money, receive R0 [P]** isn't allowed: if nothing came, leave it due (CARRY or DROP at payday).
+- **Schema 3 (0.5.0)**: `Line.paysCard?`, `Line.carried?`, `deduct` entries. The 2 → 3 migration only stamps the version. Fixture `__tests__/fixtures/ledger-v3.json`.
 - **A blocked tick explains the way out [P]**: "To pay all of it yourself instead, edit the bill and untick COMING IN" (that also changes the template, D27).

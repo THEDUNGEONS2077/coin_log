@@ -26,11 +26,14 @@
  *
  * A debit bill also has COMING IN (F15): money someone else pays in towards
  * it. In setup it can be marked ALREADY RECEIVED; a bill already paid has
- * nothing left to come in, so it isn't offered there.
+ * nothing left to come in, so it isn't offered there. Or it PAYS THE CARD
+ * (F19), the one bill that settles the credit card's deductions; in setup,
+ * with what's ALREADY DEDUCTED and not yet settled.
  */
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { Rule } from '@/components/common/Rule';
+import { Checkbox } from '@/components/form/Checkbox';
 import { ExpectedFields } from '@/components/form/ExpectedFields';
 import { AmountField, TextField } from '@/components/form/Field';
 import { Segmented } from '@/components/form/Segmented';
@@ -93,6 +96,7 @@ export function LinesEditor({ mode, drafts, onChange, showProblems }: Props) {
                 draft={d}
                 mode={mode}
                 payers={draftPayers(drafts.filter((x) => x.key !== d.key))}
+                cardTaken={drafts.some((x) => x.key !== d.key && x.paysCard && takesExpected(x.kind, x.side))}
                 showProblems={showProblems}
                 onChange={(patch) => update(d.key, patch)}
                 onRemove={() => remove(d.key)}
@@ -126,13 +130,15 @@ interface CardProps {
   mode: DraftMode;
   /** Payers named on the other cards, for FROM's chips. */
   payers: readonly string[];
+  /** Another card already PAYS THE CARD (only one may, F19). */
+  cardTaken: boolean;
   showProblems: boolean;
   onChange: (patch: Partial<LineDraft>) => void;
   onRemove: () => void;
 }
 
 /** One line's fields, in a hairline frame. */
-function LineCard({ draft: d, mode, payers, showProblems, onChange, onRemove }: CardProps) {
+function LineCard({ draft: d, mode, payers, cardTaken, showProblems, onChange, onRemove }: CardProps) {
   const problems = draftProblems(d, mode);
   const show = (p: string | null) => (showProblems ? p : null);
   const named = d.isFood ? 'Food' : d.name.trim() || 'New line';
@@ -210,7 +216,29 @@ function LineCard({ draft: d, mode, payers, showProblems, onChange, onRemove }: 
         />
       )}
 
-      {takesExpected(d.kind, d.side) && !(mode === 'start' && d.paid) && (
+      {/* One bill pays the card (F19); it can't also have COMING IN. */}
+      {takesExpected(d.kind, d.side) && !d.expected.on && (d.paysCard || !cardTaken) && (
+        <View style={styles.card2}>
+          <Checkbox
+            checked={d.paysCard}
+            onChange={(paysCard) => onChange({ paysCard })}
+            label="PAYS THE CARD"
+            spoken={`${named}: settles the credit card's deductions`}
+          />
+          {d.paysCard && mode === 'start' && !d.paid && (
+            <AmountField
+              label="ALREADY DEDUCTED"
+              value={d.deductedBefore}
+              onChange={(deductedBefore) => onChange({ deductedBefore })}
+              hint={d.deductedBefore === '' ? 'Deducted on the card, not settled yet' : undefined}
+              problem={show(problems.deductedBefore)}
+              accessibilityLabel={`${named}, already deducted`}
+            />
+          )}
+        </View>
+      )}
+
+      {takesExpected(d.kind, d.side) && !(mode === 'start' && d.paid) && !d.paysCard && (
         <ExpectedFields
           value={d.expected}
           onChange={(expected) => onChange({ expected })}
@@ -262,6 +290,7 @@ const styles = StyleSheet.create({
   },
   nameRow: { flexDirection: 'row', alignItems: 'flex-end', gap: space.sm },
   grow: { flex: 1 },
+  card2: { gap: space.md },
   amounts: { flexDirection: 'row', gap: space.md, alignItems: 'flex-start' },
   remove: {
     width: size.hitTarget,

@@ -15,19 +15,21 @@
  *   ± SAVINGS SET TO R8 300  +R300
  *   ↓ FROM PARTNER  +R5 400 DB  RENT R5 000 · INTERNET R400
  *   ⋯ PARTNER STILL DUE R5 400 DB  CARRIED FROM LAST CYCLE
+ *   ⊖ INTEREST     −R380 CR  CARD DEDUCTION · TO SETTLE
+ *   ✓ SETTLED CARD SETTLEMENT −R1 180 DB  TO CREDIT · DEDUCTED R1 180
  *
  * Signs are from the point of view of the money it touches: spending is
  * minus, money in is plus; moves within the budget (top-ups, moves) carry no
  * sign, since nothing leaves or arrives.
  */
 import { debitShare, expectedOf, lineName, routeLabel, savingsDelta, sideLabel } from './ledger';
-import { formatDelta, formatRand } from './money';
+import { formatDelta, formatRand, sum } from './money';
 import { type Cycle, type Entry, type Ledger, type Side, SPARE } from './types';
 
 /** How an entry is shown in a list. */
 export interface EntryView {
   /** The entry type's glyph name (theme/glyphs.ts). */
-  glyph: 'start' | 'salary' | 'spend' | 'paid' | 'cancel' | 'topUp' | 'income' | 'move' | 'adjust' | 'receive' | 'carry';
+  glyph: 'start' | 'salary' | 'spend' | 'paid' | 'cancel' | 'topUp' | 'income' | 'move' | 'adjust' | 'receive' | 'carry' | 'deduct';
   /** "RESTAURANT", "PAID RENT", … (uppercase). */
   title: string;
   /** The amount, signed where money leaves or arrives ("−R200", "+R500", "R400"); null when there's no single amount. */
@@ -72,6 +74,17 @@ export function describeEntry(entry: Entry, cycle: Cycle): EntryView {
       };
     case 'tick': {
       const line = cycle.lines.find((l) => l.id === entry.lineId);
+      if (line?.paysCard) {
+        // A card settlement: debit paid into credit, against what was deducted (D41).
+        const deducted = sum(cycle.entries.map((e) => (e.type === 'deduct' && e.lineId === line.id ? e.amount : 0)));
+        return {
+          glyph: 'paid',
+          title: `SETTLED ${line.name.toUpperCase()}`,
+          amount: formatDelta(-entry.paid),
+          side: 'DB',
+          detail: `TO CREDIT · DEDUCTED ${formatRand(deducted)}`,
+        };
+      }
       return {
         glyph: 'paid',
         title: `PAID ${lineName(cycle, entry.lineId).toUpperCase()}`,
@@ -127,6 +140,20 @@ export function describeEntry(entry: Entry, cycle: Cycle): EntryView {
         detail: entry.amount === expected ? covered : `${covered} · EXPECTED ${formatRand(expected)}`,
       };
     }
+    case 'deduct':
+      return {
+        glyph: 'deduct',
+        title: entry.label.toUpperCase(),
+        // Deducted before setup, or carried over: already in the balances, so no amount moved now.
+        amount: entry.origin ? formatRand(entry.amount) : formatDelta(-entry.amount),
+        side: 'CR',
+        detail:
+          entry.origin === 'setup'
+            ? 'DEDUCTED BEFORE SETUP · TO SETTLE'
+            : entry.origin === 'carried'
+              ? 'OWED FROM LAST CYCLE · TO SETTLE'
+              : `CARD DEDUCTION · ${lineName(cycle, entry.lineId).toUpperCase()}`,
+      };
     case 'carry':
       return {
         glyph: 'carry',

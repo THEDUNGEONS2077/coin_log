@@ -1,0 +1,182 @@
+{
+  "schemaVersion": 3,
+  "cycles": [
+    {
+      "id": "id5",
+      "startAt": 1793664000000,
+      "payDate": 1795564800000,
+      "closedAt": 1795600800000,
+      "lines": [
+        {
+          "id": "id1",
+          "side": "credit",
+          "kind": "budget",
+          "name": "Food",
+          "isFood": true,
+          "amount": 1800,
+          "base": 1800
+        },
+        {
+          "id": "id2",
+          "side": "debit",
+          "kind": "bill",
+          "name": "Rent",
+          "isFood": false,
+          "amount": 10000,
+          "base": 10000,
+          "expected": {
+            "payer": "Partner",
+            "amount": 5000
+          }
+        },
+        {
+          "id": "id3",
+          "side": "debit",
+          "kind": "bill",
+          "name": "Card settlement",
+          "isFood": false,
+          "amount": 1200,
+          "base": 1200,
+          "paysCard": true
+        }
+      ],
+      "entries": [
+        {
+          "id": "id4",
+          "at": 1793707200000,
+          "type": "start",
+          "actualDebit": 20000,
+          "actualCredit": 10000,
+          "savingsOnHand": 5000
+        },
+        {
+          "id": "id6",
+          "at": 1794301200000,
+          "type": "deduct",
+          "lineId": "id3",
+          "amount": 380,
+          "label": "Interest"
+        },
+        {
+          "id": "id7",
+          "at": 1794474000000,
+          "type": "deduct",
+          "lineId": "id3",
+          "amount": 750,
+          "label": "Facility"
+        }
+      ]
+    },
+    {
+      "id": "id11",
+      "startAt": 1795564800000,
+      "payDate": 1798070400000,
+      "closedAt": null,
+      "lines": [
+        {
+          "id": "id1",
+          "side": "credit",
+          "kind": "budget",
+          "name": "Food",
+          "isFood": true,
+          "amount": 1800,
+          "base": 1800
+        },
+        {
+          "id": "id2",
+          "side": "debit",
+          "kind": "bill",
+          "name": "Rent",
+          "isFood": false,
+          "amount": 10000,
+          "base": 10000,
+          "expected": {
+            "payer": "Partner",
+            "amount": 5000
+          }
+        },
+        {
+          "id": "id3",
+          "side": "debit",
+          "kind": "bill",
+          "name": "Card settlement",
+          "isFood": false,
+          "amount": 1200,
+          "base": 1200,
+          "paysCard": true
+        },
+        {
+          "id": "id8",
+          "side": "debit",
+          "kind": "bill",
+          "name": "Card settlement (last cycle)",
+          "isFood": false,
+          "amount": 1130,
+          "base": 1130,
+          "paysCard": true,
+          "carried": true
+        }
+      ],
+      "entries": [
+        {
+          "id": "id10",
+          "at": 1795600800000,
+          "type": "salary",
+          "salary": 25000,
+          "savings": 2000,
+          "credit": 2000,
+          "actualDebit": 21000,
+          "actualCredit": 8870
+        },
+        {
+          "id": "id12",
+          "at": 1795600800000,
+          "type": "carry",
+          "payer": "Partner",
+          "amount": 5000
+        },
+        {
+          "id": "id9",
+          "at": 1795600800000,
+          "type": "deduct",
+          "lineId": "id8",
+          "amount": 1130,
+          "label": "Card deduction",
+          "origin": "carried"
+        },
+        {
+          "id": "id13",
+          "at": 1795888800000,
+          "type": "receive",
+          "payer": "Partner",
+          "shares": [
+            {
+              "lineId": "id2",
+              "amount": 5000
+            }
+          ],
+          "amount": 5000
+        },
+        {
+          "id": "id14",
+          "at": 1795942800000,
+          "type": "deduct",
+          "lineId": "id3",
+          "amount": 400,
+          "label": "Interest"
+        },
+        {
+          "id": "id15",
+          "at": 1796029200000,
+          "type": "tick",
+          "lineId": "id8",
+          "paid": 1130
+        }
+      ]
+    }
+  ],
+  "chips": {
+    "spend": [],
+    "income": []
+  }
+}

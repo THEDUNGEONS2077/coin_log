@@ -1,5 +1,15 @@
 The changes in each coin_log version, newest first. The latest six show in the app (Settings → HELP → What's new).
 
+## 0.5.0 (build 5)
+
+The card settlement: what your credit card deducts each month, paid back from money you keep aside in debit.
+
+- **PAYS THE CARD.** Tick it on one debit bill (e.g. Card settlement R1 200). Its amount is held back from spare debit, like any bill.
+- **⊖ DEDUCTED.** Under that bill, log each deduction as it hits the card: interest, fees, a budget-facility payment. Credit goes down like in your banking app, but spare credit stays the same: it's owed back to the card.
+- **Settle.** Tick the bill off when you pay the card. It starts at what was deducted; debit pays it into credit, and what you set aside but didn't need goes back to spare debit.
+- **More than you set aside?** The extra comes out of spare debit as it's logged.
+- **Payday.** Anything not settled yet carries into the new cycle as its own card settlement.
+
 ## 0.4.0 (build 4)
 
 Money coming in from someone else towards a bill, like a partner's half of the rent.

@@ -12,6 +12,10 @@
  *       [ ↓ PARTNER R5 000 DUE ]                          ← tap: receive it (F16)
  *       PARTNER R5 000 RECEIVED                           ← once it's in
  *
+ *   [ ] CARD SETTLEMENT                      R1 200  [≡]  ← PAYS THE CARD (F19)
+ *       [ ⊖ DEDUCTED ]  R1 180 DEDUCTED · TO SETTLE       ← log one (F20); [ ] settles (F21)
+ *   [x] CARD SETTLEMENT                SETTLED R1 180  [≡]
+ *
  * Layer: UI. Gestures (each with a button or a screen-reader action too):
  *   tap the row      edit the line (F5)
  *   [ ] / swipe →    tick an open bill off (F3)
@@ -19,6 +23,7 @@
  *   [+] on Food      top Food up from spare credit (F7, D23)
  *   [≡] / hold       the line's menu (top up, pay, receive, edit, cancel)
  *   [ ↓ … DUE ]      receive the payer's money (F16)
+ *   [ ⊖ DEDUCTED ]   log a deduction on the card (F20)
  */
 import { router } from 'expo-router';
 import { memo } from 'react';
@@ -53,8 +58,11 @@ export const openEdit = (lineId: string) => router.push({ pathname: '/line', par
 /** Opens RECEIVE for a payer's bill shares (F16). */
 export const openReceive = (payer: string) => router.push({ pathname: '/receive', params: { key: `bills:${payerKey(payer)}` } });
 
-/** Whether a line can be cancelled (F4): never Food, never a paid bill. */
-export const cancellable = (s: LineState) => !s.line.isFood && !s.paid;
+/** Opens DEDUCTED for the card settlement bill (F20). */
+export const openDeduct = (lineId: string) => router.push({ pathname: '/deduct', params: { line: lineId } });
+
+/** Whether a line can be cancelled (F4): never Food, never a paid bill, never a card settlement with deductions (F22). */
+export const cancellable = (s: LineState) => !s.line.isFood && !s.paid && s.deducted === 0;
 
 export const LineRow = memo(function LineRow({ state, payDate, now, onMenu }: Props) {
   const actions = useActions();
@@ -79,13 +87,15 @@ export const LineRow = memo(function LineRow({ state, payDate, now, onMenu }: Pr
       ? `, ${expected.payer} ${formatRand(state.due)} still due`
       : `, ${expected.payer}'s share received`
     : '';
+  const card = line.paysCard ? `, pays the card, ${formatRand(state.deducted)} deducted${state.owed > 0 ? ', to settle' : ''}` : '';
   const spoken = isBill
-    ? `${line.name}, bill, ${paid ? (state.tick?.beforeStart ? 'paid before setup' : `paid ${formatRand(state.spent)}`) : `${formatRand(line.amount)}, not paid yet`}${coming}`
+    ? `${line.name}, bill, ${paid ? (state.tick?.beforeStart ? 'paid before setup' : `${line.paysCard ? 'settled' : 'paid'} ${formatRand(state.spent)}`) : `${formatRand(line.amount)}, not paid yet`}${coming}${card}`
     : `${line.name}, ${formatRand(state.left)} left of ${formatRand(state.allocated)}${daily !== null ? `, ${formatRand(daily)} a day` : ''}`;
   const a11yActions = [
     { name: 'activate', label: 'Edit' },
     ...(expected && state.due > 0 ? [{ name: 'receive', label: `Receive from ${expected.payer}` }] : []),
-    ...(isBill && !paid ? [{ name: 'tick', label: 'Tick off: paid' }] : []),
+    ...(line.paysCard && !paid ? [{ name: 'deduct', label: 'Log a card deduction' }] : []),
+    ...(isBill && !paid ? [{ name: 'tick', label: line.paysCard ? 'Settle the card' : 'Tick off: paid' }] : []),
     ...(!isBill ? [{ name: 'topup', label: 'Top up' }] : []),
     ...(cancellable(state) ? [{ name: 'cancel', label: 'Cancel this line' }] : []),
   ];
@@ -94,6 +104,7 @@ export const LineRow = memo(function LineRow({ state, payDate, now, onMenu }: Pr
     if (act === 'activate') openEdit(line.id);
     else if (act === 'tick') openTick(line.id);
     else if (act === 'receive' && expected) openReceive(expected.payer);
+    else if (act === 'deduct') openDeduct(line.id);
     else if (act === 'topup') openTopUp(line.id);
     else if (act === 'cancel') cancel();
   };
@@ -103,7 +114,11 @@ export const LineRow = memo(function LineRow({ state, payDate, now, onMenu }: Pr
       id={line.id}
       enabled
       pressable
-      right={isBill && !paid ? { label: `${glyphs.checkboxOn.glyph} PAID`, onCommit: () => openTick(line.id) } : undefined}
+      right={
+        isBill && !paid
+          ? { label: `${glyphs.checkboxOn.glyph} ${line.paysCard ? 'SETTLE' : 'PAID'}`, onCommit: () => openTick(line.id) }
+          : undefined
+      }
       left={cancellable(state) ? { label: `${glyphs.cancel.glyph} CANCEL`, onCommit: cancel } : undefined}
       onSwipe={noteSwipe}
     >
@@ -141,11 +156,16 @@ export const LineRow = memo(function LineRow({ state, payDate, now, onMenu }: Pr
                 {name}
               </Text>
               <Text style={[type.body, paid ? styles.dim : styles.accent]} maxFontSizeMultiplier={maxFontSizeMultiplier}>
-                {paid ? (state.tick?.beforeStart ? 'PAID BEFORE SETUP' : `PAID ${formatRand(state.spent)}`) : formatRand(line.amount)}
+                {paid
+                  ? state.tick?.beforeStart
+                    ? 'PAID BEFORE SETUP'
+                    : `${line.paysCard ? 'SETTLED' : 'PAID'} ${formatRand(state.spent)}`
+                  : formatRand(line.amount)}
               </Text>
               <MenuButton onPress={() => onMenu(state)} />
             </View>
             {expected && <ExpectedTag payer={expected.payer} amount={expected.amount} due={state.due > 0} />}
+            {line.paysCard && !paid && <CardTag lineId={line.id} deducted={state.deducted} />}
           </>
         ) : (
           <>
@@ -216,6 +236,28 @@ function ExpectedTag({ payer, amount, due }: { payer: string; amount: number; du
   );
 }
 
+/** Under the card settlement while it's open: DEDUCTED, and what's been deducted so far (F20). */
+function CardTag({ lineId, deducted }: { lineId: string; deducted: number }) {
+  return (
+    <View style={[styles.tagIndent, styles.tagRow]}>
+      <Pressable
+        onPress={() => openDeduct(lineId)}
+        style={({ pressed }) => [styles.tag, pressed && styles.smallPressed]}
+        hitSlop={SMALL_SLOP}
+        accessible={false}
+        importantForAccessibility="no"
+      >
+        <Text style={[type.meta, styles.accent]} maxFontSizeMultiplier={maxFontSizeMultiplier}>
+          {`${glyphs.deduct.glyph} DEDUCTED`}
+        </Text>
+      </Pressable>
+      <Text style={[type.meta, deducted > 0 ? styles.text : styles.dim]} maxFontSizeMultiplier={maxFontSizeMultiplier}>
+        {deducted > 0 ? `${formatRand(deducted)} TO SETTLE` : 'NOTHING YET'}
+      </Text>
+    </View>
+  );
+}
+
 /** The `≡` that opens a line's menu (the hold gesture's visible alternative). */
 function MenuButton({ onPress }: { onPress: () => void }) {
   return (
@@ -267,6 +309,7 @@ const styles = StyleSheet.create({
   smallPressed: { backgroundColor: colors.surface, borderColor: colors.lineLit },
   // The COMING IN tag sits under the bill's name, past the [ ] box.
   tagIndent: { marginLeft: size.indent + space.sm + space.md, alignItems: 'flex-start' },
+  tagRow: { flexDirection: 'row', alignItems: 'center', gap: space.md },
   tag: {
     minHeight: SMALL,
     paddingHorizontal: space.md,

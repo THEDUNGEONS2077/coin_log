@@ -43,6 +43,9 @@ function editPath(entry: Entry): string | null {
       return '/move';
     case 'adjust':
       return '/savings-set';
+    case 'deduct':
+      // Before setup or carried over: already in the balances; delete it instead.
+      return entry.origin ? null : '/deduct';
     case 'receive':
       // Received before setup: nothing to change; delete it to make the money due again.
       return entry.beforeStart ? null : '/receive';

@@ -30,7 +30,7 @@ import {
   tickBill,
 } from '@/lib/ledger';
 import { formatRand } from '@/lib/money';
-import type { Ledger } from '@/lib/types';
+import { type Ledger, SCHEMA_VERSION } from '@/lib/types';
 import { migrate } from '@/store/migrations';
 
 import fixtureV1 from '../fixtures/ledger-v1.json';
@@ -330,10 +330,10 @@ describe('D37 the salary load: CARRY or DROP', () => {
 });
 
 describe('schema 2', () => {
-  it('migrates version 1 data unchanged, stamped as version 2', () => {
+  it('migrates version 1 data unchanged, stamped as the current version', () => {
     const { ledger, migrated } = migrate(JSON.parse(JSON.stringify(fixtureV1)));
     expect(migrated).toBe(true);
-    expect(ledger.schemaVersion).toBe(2);
+    expect(ledger.schemaVersion).toBe(SCHEMA_VERSION);
     expect(ledger.cycles).toEqual(fixtureV1.cycles);
   });
 

@@ -22,6 +22,7 @@ import {
 
 import fixtureV1 from '../fixtures/ledger-v1.json';
 import fixtureV2 from '../fixtures/ledger-v2.json';
+import fixtureV3 from '../fixtures/ledger-v3.json';
 
 const NOW = new Date(2026, 9, 27, 12).getTime();
 /** The fixture as a fresh object (tests mutate copies). */
@@ -43,13 +44,24 @@ describe('migrations', () => {
 
   it('loads the v2 fixture (expected money, a receipt, a carried amount), numbers intact', () => {
     const { ledger, migrated } = migrate(JSON.parse(JSON.stringify(fixtureV2)));
-    expect(migrated).toBe(false);
+    expect(migrated).toBe(true);
     const cycle = currentCycle(ledger)!;
     // Debit 21000 + Partner's 5400 − Rent 10000 − Internet 800 (both received) = 15600.
     // Credit 2000 − Food's 1700 left − 150 spent = 150.
     expect(computeCycle(cycle).spare).toEqual({ credit: 150, debit: 15600 });
     // Last cycle's 5400 was carried and hasn't arrived.
     expect(dues(cycle).map((d) => [d.payer, d.amount])).toEqual([['Partner', 5400]]);
+    expect(savingsTotal(ledger)).toBe(7000);
+  });
+
+  it('loads the v3 fixture (card deductions, a carried settlement, settled), numbers intact', () => {
+    const { ledger, migrated } = migrate(JSON.parse(JSON.stringify(fixtureV3)));
+    expect(migrated).toBe(false);
+    const state = computeCycle(currentCycle(ledger)!);
+    // Debit 21000 + 5000 received − 1130 settled − Rent 10000 − Card 1200 = 13670.
+    // Credit 8870 − 400 deducted + 1130 settled + 400 owed − Food 1800 = 8200.
+    expect(state.spare).toEqual({ credit: 8200, debit: 13670 });
+    expect(state.owed).toBe(400);
     expect(savingsTotal(ledger)).toBe(7000);
   });
 

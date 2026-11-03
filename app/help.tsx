@@ -127,6 +127,27 @@ const SECTIONS: Section[] = [
     ],
   },
   {
+    title: 'CARD SETTLEMENT',
+    intro:
+      'For what the credit card deducts each month (interest, fees, budget-facility payments), paid back from money you keep aside in debit.',
+    lines: [
+      {
+        key: 'PAYS THE CARD',
+        what: 'Tick it on one debit bill (e.g. Card settlement R1 200). Its amount is held back from spare debit, like any bill.',
+      },
+      {
+        key: `${g.deduct.glyph} DEDUCTED`,
+        what: 'Under that bill: log each deduction as it hits the card. Credit goes down, but spare credit stays the same: it is owed back to the card.',
+      },
+      {
+        key: `${g.checkboxOff.glyph} Settle`,
+        what: 'Tick the bill off when you pay the card. It starts at what was deducted: debit pays it into credit, and what you set aside but did not need goes back to spare debit.',
+      },
+      { key: 'More than set aside', what: 'Deductions past the bill’s amount come out of spare debit as they are logged.' },
+      { key: 'Payday', what: 'Anything not settled yet carries into the new cycle as its own card settlement, to settle as usual.' },
+    ],
+  },
+  {
     title: 'LOG TAB',
     intro: 'Every entry, newest first: this cycle on top, older cycles folded below.',
     lines: [

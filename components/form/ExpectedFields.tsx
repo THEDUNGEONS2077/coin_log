@@ -14,12 +14,12 @@
  * bills paid in by one person get the same payer and are received together
  * (D33).
  */
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 
 import { type ExpectedDraft, expectedProblems } from '@/components/lines/drafts';
-import { haptics } from '@/services/haptics';
-import { colors, glyphs, maxFontSizeMultiplier, platformText, shape, size, space, type } from '@/theme';
+import { colors, shape, space } from '@/theme';
 
+import { Checkbox } from './Checkbox';
 import { AmountField } from './Field';
 import { LabelPicker } from './LabelPicker';
 
@@ -83,47 +83,7 @@ export function ExpectedFields({ value, onChange, bill, payers, showReceived, sh
   );
 }
 
-/** `[x] LABEL`: a box that toggles. */
-function Checkbox({
-  checked,
-  onChange,
-  label,
-  spoken,
-}: {
-  checked: boolean;
-  onChange: (v: boolean) => void;
-  label: string;
-  spoken: string;
-}) {
-  return (
-    <Pressable
-      onPress={() => {
-        haptics.check();
-        onChange(!checked);
-      }}
-      style={styles.box}
-      accessibilityRole="checkbox"
-      accessibilityState={{ checked }}
-      aria-checked={checked}
-      accessibilityLabel={spoken}
-    >
-      <Text style={[type.glyph, checked ? styles.accent : styles.text, styles.mark]} maxFontSizeMultiplier={maxFontSizeMultiplier}>
-        {checked ? glyphs.checkboxOn.glyph : glyphs.checkboxOff.glyph}
-      </Text>
-      <Text style={[type.meta, checked ? styles.bright : styles.dim]} maxFontSizeMultiplier={maxFontSizeMultiplier}>
-        {label}
-      </Text>
-    </Pressable>
-  );
-}
-
 const styles = StyleSheet.create({
   wrap: { gap: space.md },
   inner: { gap: space.md, paddingLeft: space.md, borderLeftWidth: shape.hairline, borderLeftColor: colors.line },
-  box: { flexDirection: 'row', alignItems: 'center', gap: space.sm, minHeight: size.hitTarget },
-  mark: { letterSpacing: shape.checkboxTracking },
-  accent: { color: colors.accent, ...platformText },
-  bright: { color: colors.textBright, ...platformText },
-  text: { color: colors.text, ...platformText },
-  dim: { color: colors.textDim, ...platformText },
 });

@@ -457,6 +457,77 @@ async function expectedFlows(browser) {
   check(errors.length === 0, `no page errors on the expected-money page${errors.length ? `: ${errors.join(' | ')}` : ''}`);
 }
 
+/**
+ * D39–D42: the card settlement, from a saved version-2 budget (the 2 → 3
+ * migration runs too): debit R20 000 with Card settlement R1 200, credit
+ * R10 000 with Food R1 800. Spare credit 8 200, spare debit 18 800.
+ */
+async function cardFlows(browser) {
+  const day = 86_400_000;
+  const midnight = new Date();
+  midnight.setHours(0, 0, 0, 0);
+  const ledger = {
+    schemaVersion: 2,
+    cycles: [
+      {
+        id: 'c1',
+        startAt: midnight.getTime() - 5 * day,
+        payDate: midnight.getTime() + 20 * day,
+        closedAt: null,
+        lines: [
+          { id: 'food', side: 'credit', kind: 'budget', name: 'Food', isFood: true, amount: 1800, base: 1800 },
+          { id: 'card', side: 'debit', kind: 'bill', name: 'Card settlement', isFood: false, amount: 1200, base: 1200 },
+        ],
+        entries: [{ id: 'e1', at: midnight.getTime() - 5 * day, type: 'start', actualDebit: 20000, actualCredit: 10000, savingsOnHand: 0 }],
+      },
+    ],
+    chips: { spend: [], income: [] },
+  };
+  const { page, errors } = await freshPage(browser, ledger);
+
+  // F19: mark the bill.
+  await row(page, 'Card settlement').click();
+  await page.waitForTimeout(400);
+  await page.getByRole('checkbox', { name: "Card settlement: settles the credit card's deductions" }).click();
+  await tap(page, 'Save the line');
+  let main = await text(page);
+  check(main.includes('⊖ DEDUCTED') && main.includes('NOTHING YET'), 'PAYS THE CARD adds DEDUCTED under the bill');
+
+  // F20: two deductions; credit drops, spare credit doesn't.
+  await page.getByText('⊖ DEDUCTED', { exact: true }).click();
+  await page.waitForTimeout(400);
+  await type(page, 'AMOUNT', '380');
+  await type(page, 'Label', 'Interest');
+  const form = await text(page);
+  check(form.includes('CREDIT AVAILABLE R9\u00A0620') && form.includes('SPARE CREDIT R8\u00A0200'), 'a deduction lowers credit but not spare credit');
+  await page.screenshot({ path: join(shots, 'card-deduct.png'), fullPage: true });
+  await tap(page, 'Log the deduction');
+  await page.getByText('⊖ DEDUCTED', { exact: true }).click();
+  await page.waitForTimeout(400);
+  await type(page, 'AMOUNT', '800');
+  check((await text(page)).includes('INTEREST'), 'a deduction label becomes a chip');
+  await type(page, 'Label', 'Facility');
+  await tap(page, 'Log the deduction');
+  main = await text(page);
+  check(main.includes('R8\u00A0200') && main.includes('R1\u00A0180 TO SETTLE'), 'the bill shows what is owed to the card');
+  await page.screenshot({ path: join(shots, 'card-owed.png') });
+
+  // F21: settle, prefilled with what was deducted.
+  await page.getByText('[ ]', { exact: true }).first().click();
+  await page.waitForTimeout(400);
+  const settle = await text(page);
+  check(settle.includes('SETTLES WHAT WAS DEDUCTED') && settle.includes('CREDIT AVAILABLE R10\u00A0000'), 'SETTLE starts at what was deducted');
+  await page.screenshot({ path: join(shots, 'card-settle.png'), fullPage: true });
+  await tap(page, 'Settled: pay the card');
+  main = await text(page);
+  check(main.includes('SETTLED R1\u00A0180') && main.includes('R18\u00A0820') && main.includes('R8\u00A0200'), 'settling pays debit into credit');
+  check(!main.includes('⊖ DEDUCTED'), 'nothing more can be deducted once settled');
+  await tap(page, 'Log of every entry');
+  main = await text(page);
+  check(main.includes('INTEREST') && main.includes('SETTLED CARD SETTLEMENT'), 'LOG shows the deductions and the settlement');
+  check(errors.length === 0, `no page errors on the card page${errors.length ? `: ${errors.join(' | ')}` : ''}`);
+}
+
 const browser = await chromium.launch();
 try {
   const { page, errors } = await freshPage(browser);
@@ -468,6 +539,7 @@ try {
   check(errors.length === 0, `no page errors${errors.length ? `: ${errors.join(' | ')}` : ''}`);
   await paydayLine(browser);
   await expectedFlows(browser);
+  await cardFlows(browser);
 } finally {
   await browser.close();
 }

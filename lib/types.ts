@@ -10,7 +10,7 @@
  */
 
 /** Data format version, for migrations (store/migrations). */
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 /** An amount in whole rand. Stored amounts are integers ≥ 0 unless a field says otherwise. */
 export type Rand = number;
@@ -55,6 +55,18 @@ export interface Line {
    * the template, so it's due again every cycle.
    */
   expected?: Expected;
+  /**
+   * Debit bills only, at most one per cycle besides a carried one (PLAN
+   * D39): the card settlement. Deductions on the card (interest, fees,
+   * budget-facility payments) are logged against it (`deduct` entries) and
+   * owed back to credit; ticking it off pays them from debit into credit.
+   */
+  paysCard?: boolean;
+  /**
+   * A one-off card settlement carried from last cycle (D42): what was still
+   * owed to the card at the salary load. Not part of the template.
+   */
+  carried?: boolean;
 }
 
 /** Money expected from someone else towards a bill (PLAN D32). */
@@ -209,6 +221,24 @@ export interface CarryEntry extends EntryBase {
   amount: Rand;
 }
 
+/**
+ * A deduction on the credit card (PLAN F20): interest, fees, a
+ * budget-facility payment. Credit −amount; it's owed back to the card until
+ * the PAYS THE CARD bill (`lineId`) is settled, so spare credit doesn't change.
+ */
+export interface DeductEntry extends EntryBase {
+  type: 'deduct';
+  lineId: ID;
+  amount: Rand;
+  /** As typed ("Interest"), or "Card deduction". */
+  label: string;
+  /**
+   * Already in the balances, so it changes no balance, only what's owed:
+   * deducted before setup (F19) or carried from last cycle (D42).
+   */
+  origin?: 'setup' | 'carried';
+}
+
 /** One log entry: every money movement in a cycle (PLAN §2). */
 export type Entry =
   | StartEntry
@@ -221,7 +251,8 @@ export type Entry =
   | MoveEntry
   | AdjustEntry
   | ReceiveEntry
-  | CarryEntry;
+  | CarryEntry
+  | DeductEntry;
 
 /** One pay cycle, from a salary (or the first-run start) to the next. */
 export interface Cycle {

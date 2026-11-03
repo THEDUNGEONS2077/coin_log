@@ -31,9 +31,13 @@ type Migration = (data: any) => any;
  *          version 1 data is already valid version 2 data: the step only
  *          stamps the version. (The bump keeps an older app, which doesn't
  *          know the new entries, from opening and overwriting the data.)
+ *   2 → 3  the card settlement (PLAN D39–D42): bills may carry `paysCard`
+ *          and `carried`, and there are `deduct` entries. Additions again,
+ *          so the step only stamps the version.
  */
 export const MIGRATIONS: Record<number, Migration> = {
   1: (data) => data,
+  2: (data) => data,
 };
 
 /** Thrown when saved data comes from a *newer* app version than this one. */
@@ -117,7 +121,9 @@ export function assertValidLedger(s: unknown): asserts s is Ledger {
       // Exactly one opening entry per cycle, and it comes first.
       check(opening === (j === 0), `cycle ${i} opening entry`);
       check(
-        ['start', 'salary', 'spend', 'tick', 'cancel', 'topup', 'income', 'move', 'adjust', 'receive', 'carry'].includes(e.type as string),
+        ['start', 'salary', 'spend', 'tick', 'cancel', 'topup', 'income', 'move', 'adjust', 'receive', 'carry', 'deduct'].includes(
+          e.type as string,
+        ),
         `entry ${e.id} type`,
       );
     });

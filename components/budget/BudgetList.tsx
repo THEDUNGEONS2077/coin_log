@@ -11,7 +11,7 @@
  * Layer: UI. The current cycle's lines grouped by side, in the cycle's
  * order (lib/ledger.ts keeps Food first). Each side's [ + ] adds a line to
  * it (F6). A line's menu (its [≡], or holding the row) is one action sheet
- * for the whole list: TOP UP, PAY, RECEIVE, EDIT, CANCEL, as the line allows.
+ * for the whole list: TOP UP, PAY, RECEIVE, DEDUCTED, EDIT, CANCEL, as the line allows.
  * Money carried over from last cycle (still due, not tied to a bill) is
  * listed under DEBIT, each with RECEIVE (F16).
  */
@@ -30,7 +30,7 @@ import { haptics } from '@/services/haptics';
 import { useActions, useBudget } from '@/store/react';
 import { colors, glowShadow, glyphs, maxFontSizeMultiplier, platformText, shape, size, space, type } from '@/theme';
 
-import { cancellable, LineRow, openEdit, openReceive, openTick, openTopUp } from './LineRow';
+import { cancellable, LineRow, openDeduct, openEdit, openReceive, openTick, openTopUp } from './LineRow';
 
 /** Opens the add-a-line page for a side (F6). */
 const openAdd = (side: Side) => router.push({ pathname: '/line', params: { side } });
@@ -54,8 +54,11 @@ export function BudgetList({ bottomInset }: { bottomInset: number }) {
           },
         ]
       : []),
+    ...(s.line.paysCard && !s.paid
+      ? [{ glyph: glyphs.deduct.glyph, label: 'Log a card deduction', onPress: () => openDeduct(s.line.id) }]
+      : []),
     ...(s.line.kind === 'bill' && !s.paid
-      ? [{ glyph: glyphs.paid.glyph, label: 'Tick off: paid', onPress: () => openTick(s.line.id) }]
+      ? [{ glyph: glyphs.paid.glyph, label: s.line.paysCard ? 'Settle the card' : 'Tick off: paid', onPress: () => openTick(s.line.id) }]
       : []),
     { glyph: glyphs.edit.glyph, label: 'Edit', onPress: () => openEdit(s.line.id) },
     ...(cancellable(s)

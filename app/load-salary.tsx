@@ -9,6 +9,10 @@
  *   STEP 4/4 · STILL DUE only when expected money hasn't arrived (D37):
  *                        CARRY or DROP for each payer, [ CONFIRM ]
  *
+ * Card deductions not yet settled carry over by themselves (D42): step 3
+ * says so, and its spare preview holds them back on debit and adds them
+ * back on credit, as the new cycle will.
+ *
  * Layer: UI (Expo Router screen). Opened from ⊕ SALARY or the red payday
  * line, at any time (also before the pay date). Nothing changes until
  * CONFIRM, which runs the F1 builder: it closes this cycle and opens the
@@ -28,7 +32,17 @@ import { AmountField, DateField, FormButton, FormPage, Missing, Segmented, Spare
 import { anyProblem, draftsFrom, type LineDraft, toSalaryLines } from '@/components/lines/drafts';
 import { LinesEditor } from '@/components/lines/LinesEditor';
 import { addDays, addMonths, dayDiff, startOfDay } from '@/lib/dates';
-import { debitShare, type DueChoice, payerDues, salarySpare, type SalaryLineInput, sideLabel, SIDES, templateLines } from '@/lib/ledger';
+import {
+  cardOwed,
+  debitShare,
+  type DueChoice,
+  payerDues,
+  salarySpare,
+  type SalaryLineInput,
+  sideLabel,
+  SIDES,
+  templateLines,
+} from '@/lib/ledger';
 import { formatRand, parseRand } from '@/lib/money';
 import type { Ledger, SalaryEntry } from '@/lib/types';
 import { haptics } from '@/services/haptics';
@@ -59,13 +73,24 @@ function lastSalary(ledger: Ledger): SalaryEntry | null {
 export default function LoadSalaryScreen() {
   const { ledger, cycle } = useBudget();
   if (!cycle) return <Missing title="load salary" what="Set coin_log up first: the salary load starts from your current budget." />;
-  return <LoadSalary ledger={ledger} template={templateLines(cycle)} owing={payerDues(cycle)} />;
+  return <LoadSalary ledger={ledger} template={templateLines(cycle)} owing={payerDues(cycle)} owedToCard={cardOwed(cycle)} />;
 }
 
 /** One payer with money still due in the closing cycle (the STILL DUE step). */
 type Owing = ReturnType<typeof payerDues>[number];
 
-function LoadSalary({ ledger, template, owing }: { ledger: Ledger; template: SalaryLineInput[]; owing: Owing[] }) {
+function LoadSalary({
+  ledger,
+  template,
+  owing,
+  owedToCard,
+}: {
+  ledger: Ledger;
+  template: SalaryLineInput[];
+  owing: Owing[];
+  /** Deducted on the card and not settled: carried into the new cycle (D42). */
+  owedToCard: number;
+}) {
   const actions = useActions();
   const now = useMinute();
   const [step, setStep] = useState<Step>(1);
@@ -314,7 +339,12 @@ function LoadSalary({ ledger, template, owing }: { ledger: Ledger; template: Sal
       ) : (
         <LinesEditor mode="salary" drafts={drafts} onChange={setDrafts} showProblems={tried} />
       )}
-      <SparePreview spare={salarySpare({ actualDebit: actualDebit ?? 0, actualCredit: actualCredit ?? 0, lines })} />
+      {owedToCard > 0 && (
+        <Text style={[type.meta, styles.text]} maxFontSizeMultiplier={maxFontSizeMultiplier}>
+          {`CARD: ${formatRand(owedToCard)} STILL TO SETTLE · CARRIED INTO THE NEW CYCLE`}
+        </Text>
+      )}
+      <SparePreview spare={salarySpare({ actualDebit: actualDebit ?? 0, actualCredit: actualCredit ?? 0, lines }, owedToCard)} />
     </FormPage>
   );
 }
@@ -338,6 +368,7 @@ function TemplateList({ lines }: { lines: SalaryLineInput[] }) {
                 <Text style={[type.body, styles.text, styles.grow]} numberOfLines={1} maxFontSizeMultiplier={maxFontSizeMultiplier}>
                   {l.name.toUpperCase()}
                   <Text style={[type.meta, styles.dim]}>{l.kind === 'bill' ? '  BILL' : ''}</Text>
+                  {l.paysCard && <Text style={[type.meta, styles.dim]}>{'  PAYS THE CARD'}</Text>}
                   {l.expected && (
                     <Text style={[type.meta, styles.dim]}>{`  ${l.expected.payer.toUpperCase()} ${formatRand(l.expected.amount)} IN`}</Text>
                   )}

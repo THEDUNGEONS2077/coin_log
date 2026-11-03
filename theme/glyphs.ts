@@ -56,6 +56,8 @@ export const glyphs = {
   receive: g('↓'),
   /** Expected money carried over from last cycle, still due (D37). */
   carry: g('⋯'),
+  /** A deduction on the credit card, owed back to it (F20). */
+  deduct: g('⊖'),
 
   // --- Header and actions ---
   add: g('+'),

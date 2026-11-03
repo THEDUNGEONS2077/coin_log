@@ -27,6 +27,8 @@
  *   adjust        savings ± delta
  *   receive       debit +amount; the bills it covers hold back their full amount
  *   carry         nothing (a reminder of money still due from last cycle)
+ *   deduct        credit −amount, owed back to the card: spare credit unchanged
+ *   tick (card)   a PAYS THE CARD bill: debit −paid, credit +paid; nothing owed
  * spare[side] = balance[side] − what that side's lines hold back.
  *
  * Expected money (PLAN D32–D37): a debit bill can carry an amount someone
@@ -34,6 +36,13 @@
  * (amount − expected), so receiving it leaves spare unchanged. A bill with
  * money still due can't be ticked off (D35): `commit` refuses any state
  * where it is.
+ *
+ * The card settlement (PLAN D39–D42): deductions on the card lower credit
+ * as they happen, but until the PAYS THE CARD bill is settled they're owed
+ * back to it, and spare credit adds them back:
+ *   spare credit = balance − what credit lines hold back + owed to the card.
+ * Meanwhile that bill holds back the larger of its amount and what's been
+ * deducted, on debit. Settling it moves what's paid from debit to credit.
  */
 import { dayDiff, startOfDay } from './dates';
 import { formatRand, isRand, sum } from './money';
@@ -50,6 +59,7 @@ import {
   type MoveRoute,
   type Part,
   type Rand,
+  type DeductEntry,
   type ReceiveEntry,
   SCHEMA_VERSION,
   type Share,
@@ -69,6 +79,9 @@ export function sideLabel(side: Side): string {
 
 /** Longest label or line name accepted (characters). */
 export const LABEL_MAX = 40;
+
+/** A card deduction's label when none is typed (F20). */
+export const CARD_DEDUCTION = 'Card deduction';
 
 /** The Food line's name when coin_log creates it (F0). */
 export const FOOD_NAME = 'Food';
@@ -104,28 +117,41 @@ export interface LineState {
   received: boolean;
   /** A bill's expected money still to arrive: its expected amount until received, else 0. */
   due: Rand;
+  /** A PAYS THE CARD bill: everything deducted against it this cycle (0 for other lines). */
+  deducted: Rand;
+  /** A PAYS THE CARD bill: what's owed back to the card: `deducted` until it's settled, then 0. */
+  owed: Rand;
 }
 
 /** A cycle's numbers, as shown on screen. */
 export interface CycleState {
   /** The real money on each side: the actual opening balance plus every movement since. */
   balance: Record<Side, number>;
-  /** Each side's balance minus what its lines hold back (PLAN D4). */
+  /** Each side's balance minus what its lines hold back (PLAN D4); credit adds back what's owed to the card (D39). */
   spare: Record<Side, number>;
+  /** Deducted on the card and not yet settled (D39). */
+  owed: Rand;
   /** Every line, in the cycle's order. */
   lines: LineState[];
 }
 
 /** How an entry changes `side`'s balance. Start and salary entries set it (they open the cycle). */
-function balanceDelta(entry: Entry, side: Side, lineSide: (id: ID) => Side | undefined): number {
+function balanceDelta(entry: Entry, side: Side, lineOf: (id: ID) => Line | undefined): number {
   switch (entry.type) {
     case 'start':
     case 'salary':
       return side === 'credit' ? entry.actualCredit : entry.actualDebit;
     case 'spend':
       return entry.side === side ? -entry.total : 0;
-    case 'tick':
-      return lineSide(entry.lineId) === side ? -entry.paid : 0;
+    case 'tick': {
+      const line = lineOf(entry.lineId);
+      // Settling the card pays debit into credit (D41).
+      if (line?.paysCard) return side === 'debit' ? -entry.paid : entry.paid;
+      return line?.side === side ? -entry.paid : 0;
+    }
+    case 'deduct':
+      // Already in the balances when it was deducted before setup or carried over.
+      return side === 'credit' && !entry.origin ? -entry.amount : 0;
     case 'income':
     case 'receive':
       return side === 'debit' ? entry.amount : 0;
@@ -164,17 +190,19 @@ export function routeEnds(route: MoveRoute): [Side | 'savings', Side | 'savings'
 
 /** Replays a cycle's entries into its numbers (see the file header for how each entry counts). */
 export function computeCycle(cycle: Cycle): CycleState {
-  const sideOf = new Map(cycle.lines.map((l) => [l.id, l.side]));
-  const lineSide = (id: ID) => sideOf.get(id);
+  const byId = new Map(cycle.lines.map((l) => [l.id, l]));
+  const lineOf = (id: ID) => byId.get(id);
 
   // What each line has had: top-ups and transaction parts (budgets), and the tick (bills).
   const topUps = new Map<ID, number>();
   const drawn = new Map<ID, number>();
   const ticks = new Map<ID, TickEntry>();
   const received = new Set<ID>();
+  const deducted = new Map<ID, number>();
   const balance: Record<Side, number> = { credit: 0, debit: 0 };
   for (const e of cycle.entries) {
-    for (const side of SIDES) balance[side] += balanceDelta(e, side, lineSide);
+    for (const side of SIDES) balance[side] += balanceDelta(e, side, lineOf);
+    if (e.type === 'deduct') deducted.set(e.lineId, (deducted.get(e.lineId) ?? 0) + e.amount);
     if (e.type === 'topup') topUps.set(e.lineId, (topUps.get(e.lineId) ?? 0) + e.amount);
     if (e.type === 'tick') ticks.set(e.lineId, e);
     if (e.type === 'receive') for (const sh of e.shares) received.add(sh.lineId);
@@ -184,24 +212,46 @@ export function computeCycle(cycle: Cycle): CycleState {
   }
 
   const held: Record<Side, number> = { credit: 0, debit: 0 };
+  let owedTotal = 0;
   const lines = cycle.lines.map((line): LineState => {
     if (line.kind === 'bill') {
       const tick = ticks.get(line.id) ?? null;
       const isIn = line.expected !== undefined && received.has(line.id);
       const due = line.expected && !isIn ? line.expected.amount : 0;
-      // Until someone else's share arrives, the bill holds back only yours (D32).
-      const left = tick ? 0 : line.amount - due;
+      const cardDeducted = line.paysCard ? (deducted.get(line.id) ?? 0) : 0;
+      const owed = tick ? 0 : cardDeducted;
+      owedTotal += owed;
+      // Until someone else's share arrives, the bill holds back only yours (D32); a card
+      // settlement holds back at least what's been deducted (F20).
+      const left = tick ? 0 : Math.max(line.amount - due, owed);
       held[line.side] += left;
-      return { line, allocated: line.amount, spent: tick?.paid ?? 0, left, paid: tick !== null, tick, received: isIn, due };
+      return {
+        line,
+        allocated: line.amount,
+        spent: tick?.paid ?? 0,
+        left,
+        paid: tick !== null,
+        tick,
+        received: isIn,
+        due,
+        deducted: cardDeducted,
+        owed,
+      };
     }
     const allocated = line.amount + (topUps.get(line.id) ?? 0);
     const spent = drawn.get(line.id) ?? 0;
     const left = allocated - spent;
     held[line.side] += left;
-    return { line, allocated, spent, left, paid: false, tick: null, received: false, due: 0 };
+    return { line, allocated, spent, left, paid: false, tick: null, received: false, due: 0, deducted: 0, owed: 0 };
   });
 
-  return { balance, spare: { credit: balance.credit - held.credit, debit: balance.debit - held.debit }, lines };
+  return {
+    balance,
+    // What's owed to the card comes back to credit when it's settled, so it's still spare (D39).
+    spare: { credit: balance.credit - held.credit + owedTotal, debit: balance.debit - held.debit },
+    owed: owedTotal,
+    lines,
+  };
 }
 
 /** Total savings: every savings movement in every cycle (PLAN D17, F14). */
@@ -294,15 +344,21 @@ export function knownPayers(ledger: Ledger): string[] {
   return names.filter((n) => !seen.has(payerKey(n)) && seen.add(payerKey(n)));
 }
 
+/** The current cycle's PAYS THE CARD bill (not a carried one), or null: only one may have it (F19). */
+export function cardBill(ledger: Ledger): Line | null {
+  return currentCycle(ledger)?.lines.find((l) => l.paysCard && !l.carried) ?? null;
+}
+
 /** "PARTNER R5 400 DUE" (a bill row's tag, + IN's list). */
 export function describeDue(payer: string, amount: Rand): string {
   return `${payer.toUpperCase()} ${formatRand(amount)} DUE`;
 }
 
 /**
- * The expected-money rules a state must keep (D35, F16), besides never
- * going below zero: a paid bill has nothing still due, and every receipt
- * of a carried amount still has its carry entry. Null when they hold.
+ * The rules a state must keep besides never going below zero: a paid bill
+ * has nothing still due (D35), every receipt of a carried amount still has
+ * its carry entry (F16), and the card-settlement rules (cardProblem). Null
+ * when they hold.
  */
 function dueProblem(cycle: Cycle): string | null {
   for (const l of computeCycle(cycle).lines) {
@@ -312,6 +368,24 @@ function dueProblem(cycle: Cycle): string | null {
   const carries = new Set(cycle.entries.flatMap((e) => (e.type === 'carry' ? [e.id] : [])));
   for (const e of cycle.entries) {
     if (e.type === 'receive' && e.carryId && !carries.has(e.carryId)) return 'IT WAS RECEIVED: DELETE THE RECEIPT FIRST';
+  }
+  return cardProblem(cycle);
+}
+
+/**
+ * The card-settlement rules (D39, F19): PAYS THE CARD is on debit bills
+ * only, never with COMING IN, on one bill per cycle (besides one carried
+ * from last cycle), and every deduction belongs to such a bill. Null when
+ * they hold.
+ */
+function cardProblem(cycle: Cycle): string | null {
+  const card = cycle.lines.filter((l) => l.paysCard);
+  if (card.some((l) => l.kind !== 'bill' || l.side !== 'debit')) return 'PAYS THE CARD IS FOR DEBIT BILLS ONLY';
+  if (card.some((l) => l.expected)) return 'A BILL THAT PAYS THE CARD CAN’T ALSO HAVE COMING IN';
+  if (card.filter((l) => !l.carried).length > 1) return 'ONLY ONE BILL CAN PAY THE CARD';
+  const ids = new Set(card.map((l) => l.id));
+  for (const e of cycle.entries) {
+    if (e.type === 'deduct' && !ids.has(e.lineId)) return 'IT HAS CARD DEDUCTIONS: DELETE THEM FIRST';
   }
   return null;
 }
@@ -476,6 +550,10 @@ export interface StartLineInput {
   expected?: Expected | null;
   /** That money has already arrived (F15 "ALREADY RECEIVED"): the actual debit balance includes it. */
   expectedIn?: boolean;
+  /** Debit bills: PAYS THE CARD (F19). */
+  paysCard?: boolean;
+  /** PAYS THE CARD: already deducted on the card this cycle, not yet settled (F19 "ALREADY DEDUCTED"). */
+  deductedBefore?: Rand;
 }
 
 /** The setup screen's answers (F0). */
@@ -494,11 +572,14 @@ export interface StartInput {
  * unpaid bill's amount; a paid bill holds nothing).
  */
 export function startSpare(input: Pick<StartInput, 'actualDebit' | 'actualCredit' | 'lines'>): Record<Side, number> {
-  // An unpaid bill holds back its amount, less money still to come in from someone else (D32).
+  // An unpaid bill holds back its amount, less money still to come in from someone else (D32);
+  // a card settlement at least what's already been deducted (F20).
+  const owed = (l: StartLineInput) => (l.kind === 'bill' && l.paysCard && !l.paid ? (l.deductedBefore ?? 0) : 0);
   const holds = (l: StartLineInput) =>
-    l.kind === 'budget' ? l.leftNow : l.paid ? 0 : l.monthly - (l.expected && !l.expectedIn ? l.expected.amount : 0);
+    l.kind === 'budget' ? l.leftNow : l.paid ? 0 : Math.max(l.monthly - (l.expected && !l.expectedIn ? l.expected.amount : 0), owed(l));
   const held = (side: Side) => sum(input.lines.filter((l) => l.side === side).map(holds));
-  return { credit: input.actualCredit - held('credit'), debit: input.actualDebit - held('debit') };
+  // What's owed to the card comes back to credit, so it's spare there (D39).
+  return { credit: input.actualCredit - held('credit') + sum(input.lines.map(owed)), debit: input.actualDebit - held('debit') };
 }
 
 /** F0: starts coin_log mid-cycle from the balances as they are now. */
@@ -513,6 +594,7 @@ export function start(ledger: Ledger, input: StartInput, ids: Ids): Result {
     if (!isRand(l.monthly) || (l.kind === 'budget' && !isRand(l.leftNow))) return fail(NOT_AN_AMOUNT);
     if (l.kind === 'budget' && l.leftNow > l.monthly)
       return fail(`${cleanText(l.name)!.toUpperCase()}: LEFT NOW CAN’T BE MORE THAN MONTHLY`);
+    if (l.deductedBefore !== undefined && !isRand(l.deductedBefore)) return fail(NOT_AN_AMOUNT);
     // A bill already paid has nothing left to come in this cycle [P].
     const expected = cleanExpected(l.kind === 'bill' && l.paid ? null : l.expected, { ...l, amount: l.monthly });
     if ('error' in expected) return fail(expected.error);
@@ -523,6 +605,8 @@ export function start(ledger: Ledger, input: StartInput, ids: Ids): Result {
   const paidBills: ID[] = [];
   // Money that arrived before setup, per payer: received with nothing added (the balance has it).
   const inBefore = new Map<string, ReceiveEntry>();
+  // Card deductions before setup: owed, with nothing deducted again (the balance has them).
+  const deductedBefore: Entry[] = [];
   for (const l of ordered(input.lines)) {
     const id = ids.newId();
     const amount = l.kind === 'budget' ? l.leftNow : l.monthly;
@@ -536,8 +620,20 @@ export function start(ledger: Ledger, input: StartInput, ids: Ids): Result {
       amount,
       base: l.monthly,
       ...(expected && { expected }),
+      ...(l.paysCard && { paysCard: true }),
     });
     if (l.kind === 'bill' && l.paid) paidBills.push(id);
+    if (l.paysCard && !l.paid && (l.deductedBefore ?? 0) > 0) {
+      deductedBefore.push({
+        id: '',
+        at: ids.now,
+        type: 'deduct',
+        lineId: id,
+        amount: l.deductedBefore!,
+        label: CARD_DEDUCTION,
+        origin: 'setup',
+      });
+    }
     if (expected && l.expectedIn) {
       const k = payerKey(expected.payer);
       const r = inBefore.get(k) ?? {
@@ -566,6 +662,8 @@ export function start(ledger: Ledger, input: StartInput, ids: Ids): Result {
     ...paidBills.map((lineId): Entry => ({ id: ids.newId(), at: ids.now, type: 'tick', lineId, paid: 0, beforeStart: true })),
     // Expected money that had already arrived (F15).
     ...[...inBefore.values()].map((r): Entry => ({ ...r, id: ids.newId() })),
+    // Card deductions not yet settled (F19).
+    ...deductedBefore.map((d): Entry => ({ ...d, id: ids.newId() })),
   ];
   const cycle: Cycle = {
     id: ids.newId(),
@@ -593,6 +691,8 @@ export interface SalaryLineInput {
   amount: Rand;
   /** Debit bills: money someone else pays in towards it (F15); due again in the new cycle. */
   expected?: Expected | null;
+  /** Debit bills: PAYS THE CARD (F19). */
+  paysCard?: boolean;
 }
 
 /** What to do with money still due when the salary is loaded (D37). */
@@ -622,24 +722,36 @@ export function debitShare(salary: Rand, savings: Rand, credit: Rand): number {
   return salary - savings - credit;
 }
 
-/** RESET (F1 step 3): every line of the current cycle back at its template default. */
+/** RESET (F1 step 3): every line of the current cycle back at its template default (a carried card settlement isn't one, D42). */
 export function templateLines(cycle: Cycle): SalaryLineInput[] {
-  return cycle.lines.map((l) => ({
-    id: l.id,
-    name: l.name,
-    kind: l.kind,
-    side: l.side,
-    isFood: l.isFood,
-    amount: l.base,
-    ...(l.expected && { expected: l.expected }),
-  }));
+  return cycle.lines
+    .filter((l) => !l.carried)
+    .map((l) => ({
+      id: l.id,
+      name: l.name,
+      kind: l.kind,
+      side: l.side,
+      isFood: l.isFood,
+      amount: l.base,
+      ...(l.expected && { expected: l.expected }),
+      ...(l.paysCard && { paysCard: true }),
+    }));
 }
 
-/** What each side's spare would be after a salary load (F1's live preview; D16, D18). */
-export function salarySpare(input: Pick<SalaryInput, 'actualDebit' | 'actualCredit' | 'lines'>): Record<Side, number> {
+/**
+ * What each side's spare would be after a salary load (F1's live preview;
+ * D16, D18). `cardOwed`: what the closing cycle still owes the card, carried
+ * over (D42): held back on debit, and coming back to credit.
+ */
+export function salarySpare(input: Pick<SalaryInput, 'actualDebit' | 'actualCredit' | 'lines'>, cardOwed = 0): Record<Side, number> {
   // A bill holds back its amount less what someone else still pays in (D32).
   const held = (side: Side) => sum(input.lines.filter((l) => l.side === side).map((l) => l.amount - (l.expected?.amount ?? 0)));
-  return { credit: input.actualCredit - held('credit'), debit: input.actualDebit - held('debit') };
+  return { credit: input.actualCredit - held('credit') + cardOwed, debit: input.actualDebit - held('debit') - cardOwed };
+}
+
+/** What a cycle still owes the card (deducted, not settled): carried into the next one at the salary load (D42). */
+export function cardOwed(cycle: Cycle): Rand {
+  return computeCycle(cycle).owed;
 }
 
 /** F1: closes the current cycle and opens the next one from the salary and the actual balances. */
@@ -686,7 +798,35 @@ export function loadSalary(ledger: Ledger, input: SalaryInput, ids: Ids): Result
     amount: l.amount,
     base: l.amount,
     ...(expectations.get(l) && { expected: expectations.get(l) }),
+    ...(l.paysCard && { paysCard: true }),
   }));
+  // Still owed to the card: a one-off settlement in the new cycle, already deducted (D42).
+  const owed = cardOwed(current);
+  const carriedEntries: Entry[] = [];
+  if (owed > 0) {
+    const from = current.lines.find((l) => l.paysCard && !l.carried)?.name ?? 'Card settlement';
+    const carried: Line = {
+      id: ids.newId(),
+      side: 'debit',
+      kind: 'bill',
+      name: `${from} (last cycle)`.slice(0, LABEL_MAX),
+      isFood: false,
+      amount: owed,
+      base: owed,
+      paysCard: true,
+      carried: true,
+    };
+    lines.push(carried);
+    carriedEntries.push({
+      id: ids.newId(),
+      at: ids.now,
+      type: 'deduct',
+      lineId: carried.id,
+      amount: owed,
+      label: CARD_DEDUCTION,
+      origin: 'carried',
+    });
+  }
   const salary: Entry = {
     id: ids.newId(),
     at: ids.now,
@@ -704,7 +844,7 @@ export function loadSalary(ledger: Ledger, input: SalaryInput, ids: Ids): Result
     payDate: startOfDay(input.payDate),
     closedAt: null,
     lines,
-    entries: [salary, ...carries.map((c): Entry => ({ ...c, id: ids.newId() }))],
+    entries: [salary, ...carries.map((c): Entry => ({ ...c, id: ids.newId() })), ...carriedEntries],
   };
   return commit({ ...ledger, cycles: [...ledger.cycles.slice(0, -1), closed, next] }, next);
 }
@@ -806,6 +946,8 @@ export function cancelLine(ledger: Ledger, lineId: ID, ids: Ids): Result {
   if (line.isFood) return fail('FOOD CAN’T BE CANCELLED');
   const state = computeCycle(cycle).lines[index]!;
   if (state.paid) return fail(`${line.name.toUpperCase()} IS ALREADY PAID`);
+  // What's deducted on the card still has to be settled (F22).
+  if (state.deducted > 0) return fail('IT HAS CARD DEDUCTIONS: SETTLE IT, OR DELETE THEM FIRST');
   const entry: CancelEntry = { id: ids.newId(), at: ids.now, type: 'cancel', line, index, released: Math.max(0, state.left) };
   const next: Cycle = { ...withEntry(cycle, entry), lines: cycle.lines.filter((l) => l.id !== lineId) };
   return commit(ledger, next);
@@ -821,7 +963,8 @@ export function lineHasEntries(cycle: Cycle, lineId: ID): boolean {
     (e) =>
       ((e.type === 'tick' || e.type === 'topup') && e.lineId === lineId) ||
       (e.type === 'spend' && e.parts.some((p) => p.source === lineId)) ||
-      (e.type === 'receive' && e.shares.some((sh) => sh.lineId === lineId)),
+      (e.type === 'receive' && e.shares.some((sh) => sh.lineId === lineId)) ||
+      (e.type === 'deduct' && e.lineId === lineId),
   );
 }
 
@@ -833,6 +976,8 @@ export interface LinePatch {
   side?: Side;
   /** Money someone else pays in (F15); null removes it. Locked once received this cycle. */
   expected?: Expected | null;
+  /** PAYS THE CARD (F19). Can't be turned off while it has deductions. */
+  paysCard?: boolean;
 }
 
 /**
@@ -869,8 +1014,19 @@ export function editLine(ledger: Ledger, lineId: ID, patch: LinePatch): Result {
     return fail('ALREADY RECEIVED: DELETE THE RECEIPT TO CHANGE WHAT’S COMING IN');
   const expected = cleanExpected(patch.expected === undefined ? line.expected : patch.expected, { name, kind, side, amount });
   if ('error' in expected) return fail(expected.error);
-  const { expected: _old, ...rest } = line;
-  const edited: Line = { ...rest, name, kind, side, amount, base, ...(expected.value && { expected: expected.value }) };
+  const paysCard = patch.paysCard ?? !!line.paysCard;
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- dropped here, set again below when they apply
+  const { expected: _old, paysCard: _card, ...rest } = line;
+  const edited: Line = {
+    ...rest,
+    name,
+    kind,
+    side,
+    amount,
+    base,
+    ...(expected.value && { expected: expected.value }),
+    ...(paysCard && { paysCard: true }),
+  };
   // A line moved to the other side goes to the end of that side's lines.
   const others = cycle.lines.filter((l) => l.id !== lineId);
   const lines = side === line.side ? cycle.lines.map((l) => (l.id === lineId ? edited : l)) : ordered([...others, edited]);
@@ -885,6 +1041,8 @@ export interface NewLineInput {
   amount: Rand;
   /** Debit bills: money someone else pays in towards it (F15). */
   expected?: Expected | null;
+  /** Debit bills: PAYS THE CARD (F19). */
+  paysCard?: boolean;
 }
 
 /** F6: adds a line at the end of its side; its amount is held back from that side's spare. */
@@ -905,6 +1063,7 @@ export function addLine(ledger: Ledger, input: NewLineInput, ids: Ids): Result {
     amount: input.amount,
     base: input.amount,
     ...(expected.value && { expected: expected.value }),
+    ...(input.paysCard && { paysCard: true }),
   };
   return commit(ledger, { ...cycle, lines: ordered([...cycle.lines, line]) });
 }
@@ -1016,6 +1175,51 @@ export function expectedOf(entry: ReceiveEntry, cycle: Cycle): Rand {
 }
 
 // ---------------------------------------------------------------------------
+// F20: a deduction on the card
+// ---------------------------------------------------------------------------
+
+/**
+ * F20: logs a deduction on the credit card (interest, fees, a
+ * budget-facility payment) against the PAYS THE CARD bill, or (with
+ * `replacing`) changes one (F10). Credit goes down; it's owed back to the
+ * card until the bill is settled, so spare credit doesn't change. The bill
+ * holds back at least what's been deducted, so spare debit drops if the
+ * deductions pass what was set aside (refused if it can't cover that, D3).
+ * Nothing can be added or changed once the bill is settled.
+ */
+export function deduct(ledger: Ledger, lineId: ID, amount: Rand, label: string, ids: Ids, replacing?: ID): Result {
+  const cycle = needCycle(ledger);
+  if (isResult(cycle)) return cycle;
+  const edit = editing(cycle, replacing, 'deduct');
+  if (edit && 'ok' in edit) return edit;
+  const old = cycle.entries.find((e): e is DeductEntry => e.id === replacing && e.type === 'deduct');
+  if (old?.origin) return fail('IT WAS ALREADY IN THE BALANCES: DELETE IT INSTEAD');
+  const target = old?.lineId ?? lineId;
+  const state = computeCycle(cycle).lines.find((l) => l.line.id === target);
+  if (!state?.line.paysCard) return fail('THAT BILL DOESN’T PAY THE CARD');
+  if (state.paid) return fail('ALREADY SETTLED: DELETE THE SETTLEMENT TO CHANGE ITS DEDUCTIONS');
+  if (!positive(amount)) return fail(MORE_THAN_ZERO);
+  const clean = label.trim() === '' ? CARD_DEDUCTION : cleanText(label);
+  if (clean === null) return fail('A LABEL IS UP TO 40 CHARACTERS');
+  const entry: DeductEntry = { id: edit?.id ?? ids.newId(), at: edit?.at ?? ids.now, type: 'deduct', lineId: target, amount, label: clean };
+  return commit(ledger, withEntry(cycle, entry, replacing));
+}
+
+/** The labels card deductions were given before (not the default), newest first, each once: F20's chips. */
+export function deductionLabels(ledger: Ledger): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const c of [...ledger.cycles].reverse()) {
+    for (const e of [...c.entries].reverse()) {
+      if (e.type !== 'deduct' || e.origin || e.label === CARD_DEDUCTION || seen.has(e.label.toLowerCase())) continue;
+      seen.add(e.label.toLowerCase());
+      out.push(e.label);
+    }
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
 // F14: savings SET BALANCE
 // ---------------------------------------------------------------------------
 
@@ -1062,6 +1266,9 @@ export function deleteEntry(ledger: Ledger, entryId: ID): Result {
   const entry = cycle.entries.find((e) => e.id === entryId);
   if (!entry) return fail('THAT ENTRY ISN’T IN THIS CYCLE');
   if (!isChangeable(entry)) return fail('A SALARY OR START CAN ONLY BE UNDONE RIGHT AFTER IT');
+  // A settled card's deductions are part of what was settled (F20).
+  if (entry.type === 'deduct' && computeCycle(cycle).lines.find((l) => l.line.id === entry.lineId)?.paid)
+    return fail('ALREADY SETTLED: DELETE THE SETTLEMENT FIRST');
   let lines = cycle.lines;
   if (entry.type === 'cancel') {
     if (lines.some((l) => l.id === entry.line.id)) return fail('THAT LINE IS ALREADY BACK');

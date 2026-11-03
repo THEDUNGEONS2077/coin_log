@@ -9,7 +9,8 @@
  * again by the builder, which has the last word.
  *
  * A debit bill's COMING IN (expected money, PLAN F15) is drafted the same
- * way (`ExpectedDraft`), here and on the line page (app/line.tsx).
+ * way (`ExpectedDraft`), here and on the line page (app/line.tsx); so is
+ * PAYS THE CARD (F19), which takes COMING IN's place on a bill.
  */
 import { FOOD_NAME } from '@/lib/ledger';
 import type { SalaryLineInput, StartLineInput } from '@/lib/ledger';
@@ -73,6 +74,10 @@ export interface LineDraft {
   paid: boolean;
   /** Debit bills: COMING IN from someone else (F15). */
   expected: ExpectedDraft;
+  /** Debit bills: PAYS THE CARD (F19). Turns COMING IN off: a bill has one or the other. */
+  paysCard: boolean;
+  /** Setup, PAYS THE CARD: ALREADY DEDUCTED, as typed; empty means nothing. */
+  deductedBefore: string;
 }
 
 /** Which form the editor is in: setup (monthly, left now, paid) or the salary load (one amount). */
@@ -85,6 +90,7 @@ export interface DraftProblems {
   leftNow: string | null;
   payer: string | null;
   expected: string | null;
+  deductedBefore: string | null;
 }
 
 let nextKey = 0;
@@ -95,7 +101,19 @@ export function draftKey(): string {
 
 /** A new, empty line on one side (a budget until switched to a bill). */
 export function newDraft(side: Side): LineDraft {
-  return { key: draftKey(), name: '', kind: 'budget', side, isFood: false, amount: '', leftNow: '', paid: false, expected: NO_EXPECTED };
+  return {
+    key: draftKey(),
+    name: '',
+    kind: 'budget',
+    side,
+    isFood: false,
+    amount: '',
+    leftNow: '',
+    paid: false,
+    expected: NO_EXPECTED,
+    paysCard: false,
+    deductedBefore: '',
+  };
 }
 
 /** The Food line every budget starts with (PLAN D23). */
@@ -110,6 +128,8 @@ export function foodDraft(): LineDraft {
     leftNow: '',
     paid: false,
     expected: NO_EXPECTED,
+    paysCard: false,
+    deductedBefore: '',
   };
 }
 
@@ -126,6 +146,8 @@ export function draftsFrom(lines: readonly SalaryLineInput[]): LineDraft[] {
     leftNow: '',
     paid: false,
     expected: expectedDraftFrom(l.expected),
+    paysCard: !!l.paysCard,
+    deductedBefore: '',
   }));
 }
 
@@ -134,11 +156,13 @@ export function draftProblems(d: LineDraft, mode: DraftMode): DraftProblems {
   const amount = parseRand(d.amount);
   const leftNow = d.leftNow === '' ? amount : parseRand(d.leftNow);
   // A paid bill (setup) has nothing left to come in, so its COMING IN isn't used.
-  const usesExpected = takesExpected(d.kind, d.side) && !(mode === 'start' && d.paid);
+  const usesExpected = takesExpected(d.kind, d.side) && !(mode === 'start' && d.paid) && !d.paysCard;
   const expected = usesExpected ? expectedProblems(d.expected, amount) : { payer: null, amount: null };
+  const usesDeducted = mode === 'start' && takesExpected(d.kind, d.side) && d.paysCard && !d.paid;
   return {
     payer: expected.payer,
     expected: expected.amount,
+    deductedBefore: usesDeducted && d.deductedBefore !== '' && parseRand(d.deductedBefore) === null ? 'ENTER A WHOLE RAND AMOUNT' : null,
     name: d.name.trim() === '' ? 'NEEDS A NAME' : null,
     amount: amount === null ? 'ENTER A WHOLE RAND AMOUNT' : null,
     leftNow:
@@ -169,8 +193,10 @@ export function toStartLines(drafts: readonly LineDraft[]): StartLineInput[] {
       monthly,
       leftNow: d.leftNow === '' ? monthly : (parseRand(d.leftNow) ?? 0),
       paid: d.kind === 'bill' && d.paid,
-      expected: toExpected(d.expected, d.kind, d.side),
+      expected: d.paysCard ? null : toExpected(d.expected, d.kind, d.side),
       expectedIn: d.expected.received,
+      paysCard: d.paysCard && takesExpected(d.kind, d.side),
+      deductedBefore: d.paysCard ? (parseRand(d.deductedBefore) ?? 0) : 0,
     };
   });
 }
@@ -184,6 +210,7 @@ export function toSalaryLines(drafts: readonly LineDraft[]): SalaryLineInput[] {
     side: d.side,
     isFood: d.isFood,
     amount: parseRand(d.amount) ?? 0,
-    expected: toExpected(d.expected, d.kind, d.side),
+    expected: d.paysCard ? null : toExpected(d.expected, d.kind, d.side),
+    paysCard: d.paysCard && takesExpected(d.kind, d.side),
   }));
 }

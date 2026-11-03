@@ -13,7 +13,9 @@
  * more takes the extra from spare (refused if spare can't cover it, D3).
  *
  * A bill with someone else's share still due can't be ticked off (D35):
- * the page says so and offers RECEIVE instead.
+ * the page says so and offers RECEIVE instead. The PAYS THE CARD bill
+ * settles the card instead (F21): PAID TO THE CARD, prefilled with what's
+ * been deducted, moves from debit into credit.
  */
 import { router, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
@@ -65,6 +67,13 @@ export default function TickScreen() {
 }
 
 function TickForm({ lineId, entry }: { lineId: string; entry?: TickEntry }) {
+  const { state } = useBudget();
+  if (state!.lines.find((l) => l.line.id === lineId)!.line.paysCard) return <SettleForm lineId={lineId} entry={entry} />;
+  return <BillForm lineId={lineId} entry={entry} />;
+}
+
+/** An ordinary bill: what was paid against its amount (F3). */
+function BillForm({ lineId, entry }: { lineId: string; entry?: TickEntry }) {
   const actions = useActions();
   const { ledger, state } = useBudget();
   const now = useMinute();
@@ -124,3 +133,72 @@ function TickForm({ lineId, entry }: { lineId: string; entry?: TickEntry }) {
 const styles = StyleSheet.create({
   bright: { color: colors.textBright, ...platformText },
 });
+
+/**
+ * The card settlement (F21): what's paid from debit into credit, prefilled
+ * with what's been deducted. Paying more than that adds the extra to spare
+ * credit; paying less takes the gap from it (D41). On debit, whatever the
+ * bill set aside beyond what's paid goes back to spare.
+ */
+function SettleForm({ lineId, entry }: { lineId: string; entry?: TickEntry }) {
+  const actions = useActions();
+  const { ledger, state } = useBudget();
+  const now = useMinute();
+  const current = state!.lines.find((l) => l.line.id === lineId)!;
+  const { line, deducted } = current;
+  const [paidText, setPaidText] = useState(String(entry?.paid ?? deducted));
+  const [error, setError] = useState<string | null>(null);
+  const paid = parseRand(paidText);
+
+  const trial = paid === null ? null : tickBill(ledger, lineId, paid, { newId: () => 'preview', now }, entry?.id);
+  const after = trial?.ok ? budgetOf(trial.ledger).state : null;
+  const difference = paid === null ? 0 : paid - deducted;
+
+  const confirm = () => {
+    if (paid === null) return setError('ENTER WHAT YOU PAID TO THE CARD');
+    const outcome = actions.tickBill(lineId, paid, entry?.id);
+    if (outcome) return setError(outcome);
+    haptics.check();
+    router.back();
+  };
+
+  return (
+    <FormPage
+      title={entry ? 'edit settlement' : 'settle card'}
+      closeLabel="Cancel"
+      intro="Pays the card from debit: credit goes back up by what you pay."
+      error={error}
+      actions={
+        <FormButton
+          label={entry ? 'SAVE' : 'SETTLED'}
+          onPress={confirm}
+          primary
+          grow
+          accessibilityLabel={entry ? 'Save' : 'Settled: pay the card'}
+        />
+      }
+    >
+      <Text style={[type.group, styles.bright]} maxFontSizeMultiplier={maxFontSizeMultiplier}>
+        {`${line.name.toUpperCase()} · SET ASIDE ${formatRand(line.amount)} · DEDUCTED ${formatRand(deducted)}`}
+      </Text>
+      <AmountField label="PAID TO THE CARD" value={paidText} onChange={setPaidText} hint="From debit" autoFocus={!!entry} />
+      <Preview
+        problem={paid === null ? 'ENTER WHAT YOU PAID TO THE CARD' : trial && !trial.ok ? trial.error : null}
+        lines={[
+          difference > 0
+            ? `${formatRand(difference)} MORE THAN DEDUCTED GOES TO SPARE CREDIT`
+            : difference < 0
+              ? `${formatRand(-difference)} SHORT COMES FROM SPARE CREDIT`
+              : 'SETTLES WHAT WAS DEDUCTED',
+          ...(after
+            ? [
+                `CREDIT AVAILABLE ${formatRand(after.balance.credit)}`,
+                `SPARE CREDIT ${formatRand(after.spare.credit)}`,
+                `SPARE DEBIT ${formatRand(after.spare.debit)}`,
+              ]
+            : []),
+        ]}
+      />
+    </FormPage>
+  );
+}
