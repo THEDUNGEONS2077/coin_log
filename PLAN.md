@@ -53,6 +53,7 @@ coin_log is an offline Android budgeting app based on the concept in `C:\Users\5
 | D40 | Each deduction is logged as it appears (INTEREST, FEES, FACILITY) |
 | D41 | **SETTLE** (ticking the bill off) is prefilled with the total deducted and can be changed: debit pays it into credit and nothing is owed. More than deducted adds the extra to spare credit; less takes the gap from spare credit (blocked if short) |
 | D42 | Deductions not settled at the salary load carry over by themselves, as a one-off card settlement in the new cycle |
+| D43 | (0.6.0) The + LOG label is typed first, with the spend chips found as you type: any word starting with what's typed (ignoring case), most recently used first, up to 6; tap one to use it, otherwise the typed label is new and becomes a chip once logged. With the field empty the chips sit behind a collapsed `▸ ALL LABELS (n)`. + IN, DEDUCTED and COMING IN keep their chips as they are |
 | — | Salary-load math: **spare debit = actual debit − Σ debit lines; spare credit = actual credit − Σ credit lines (incl. Food); savings += savings amount.** CONFIRM is blocked while either spare is below zero. First run = a mid-cycle START (F0): savings on hand, the actual balances, next pay date, and lines with monthly and left-now amounts. No salary needed. Public repo THEDUNGEONS2077/coin_log, app ID `com.thedungeons2077.coinlog` (`.dev`, `.e2e`) |
 
 ---
@@ -407,5 +408,6 @@ Start from a copy of quest_log's infrastructure in a new repo, `~/projects/coin_
 - **A swipe is never also a tap [P]**: the release of a swipe on a row doesn't count as tapping it.
 - **Schema 2 (0.4.0)**: `Line.expected?`, `receive` and `carry` entries. The 1 → 2 migration only stamps the version (everything is an addition); the bump keeps an older app from opening and overwriting newer data. Fixture `__tests__/fixtures/ledger-v2.json`.
 - **Expected money, receive R0 [P]** isn't allowed: if nothing came, leave it due (CARRY or DROP at payday).
+- **Label search (D43) [P]:** a label typed in full is listed first and lit (so it always shows, and that chip is used). Chips never used on a transaction (added in Settings) come after the used ones, in Settings order. Tapping a chip fills in its saved spelling and folds ALL LABELS away; ALL LABELS starts collapsed each time the page opens. Under the matches: "NOT ONE OF THESE? LOG IT AS A NEW LABEL" (or "NEW LABEL · SAVED ONCE IT'S LOGGED" when nothing matches).
 - **Schema 3 (0.5.0)**: `Line.paysCard?`, `Line.carried?`, `deduct` entries. The 2 → 3 migration only stamps the version. Fixture `__tests__/fixtures/ledger-v3.json`.
 - **A blocked tick explains the way out [P]**: "To pay all of it yourself instead, edit the bill and untick COMING IN" (that also changes the template, D27).

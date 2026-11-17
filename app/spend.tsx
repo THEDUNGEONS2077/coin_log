@@ -5,7 +5,7 @@
  *   > log transaction
  *   [ CREDIT ][ DEBIT ]
  *   AMOUNT  R [200]
- *   LABEL   [GROCERIES] [FUEL] …  or type one
+ *   LABEL   [res          ]  [RESTAURANT] …   ← labels used before, found as you type (D43)
  *   FROM ━━━━━━━──────
  *   SPARE CREDIT · R500 AVAILABLE            R100   ← whatever the lines don't take
  *   [x] FOOD · R1 700 LEFT     TAKE R [100]
@@ -26,7 +26,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { Rule } from '@/components/common/Rule';
 import { useMinute } from '@/components/common/useMinute';
-import { AmountField, FormButton, FormPage, LabelPicker, Missing, Preview, Segmented } from '@/components/form';
+import { AmountField, FormButton, FormPage, LabelSearch, Missing, Preview, Segmented } from '@/components/form';
 import { deleteEntry, type LineState, logSpend, sideLabel, SIDES, type SpendInput } from '@/lib/ledger';
 import { formatRand, parseRand, sum } from '@/lib/money';
 import { type Cycle, type Side, SPARE, type SpendEntry } from '@/lib/types';
@@ -62,7 +62,6 @@ function SpendForm({ entry }: { entry?: SpendEntry }) {
   const { ledger, cycle } = useBudget();
   const now = useMinute();
   const lastSide = useAppStore((s) => s.ui.lastSpendSide);
-  const chips = useAppStore((s) => s.ledger.chips.spend);
   const [side, setSide] = useState<Side>(entry?.side ?? lastSide);
   const [totalText, setTotalText] = useState(entry ? String(entry.total) : '');
   const [label, setLabel] = useState(entry?.label ?? '');
@@ -149,8 +148,8 @@ function SpendForm({ entry }: { entry?: SpendEntry }) {
         autoFocus={!entry}
         problem={tried && (total === null || total === 0) ? 'ENTER THE AMOUNT' : null}
       />
-      <LabelPicker
-        chips={chips}
+      <LabelSearch
+        ledger={ledger}
         value={label}
         onChange={setLabel}
         placeholder="e.g. Restaurant"

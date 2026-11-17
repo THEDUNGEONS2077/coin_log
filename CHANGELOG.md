@@ -1,5 +1,12 @@
 The changes in each coin_log version, newest first. The latest six show in the app (Settings → HELP → What's new).
 
+## 0.6.0 (build 6)
+
+Finding a label on + LOG.
+
+- **Type, then tap.** The label field comes first. As you type, labels you've used before show underneath: any with a word starting that way, most recent first. Tap one to use it; if none fits, what you typed is logged as a new label.
+- **▸ ALL LABELS.** With the field empty, your labels are folded away. Tap ALL LABELS to see them all.
+
 ## 0.5.0 (build 5)
 
 The card settlement: what your credit card deducts each month, paid back from money you keep aside in debit.

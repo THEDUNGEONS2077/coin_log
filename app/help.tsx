@@ -94,14 +94,14 @@ const SECTIONS: Section[] = [
     lines: [
       {
         key: `${g.add.glyph} LOG`,
-        what: 'A card tap: choose credit or debit, type the amount and a label (tap a chip, or type one), then tick the budget lines it came out of and how much each took. Spare covers the rest.',
+        what: 'A card tap: choose credit or debit, type the amount and a label (labels you’ve used before show as you type: tap one), then tick the budget lines it came out of and how much each took. Spare covers the rest.',
       },
       { key: 'One tap, many lines', what: 'A grocery run can cover Food, toiletries and toilet paper at once: give each its part.' },
       { key: `${g.move.glyph} MOVE`, what: 'Debit to credit, debit to savings, or savings to debit or credit.' },
       { key: `${g.income.glyph} IN`, what: 'Extra cash into debit, with a label.' },
       {
         key: 'Chips',
-        what: 'Quick labels. A label you type becomes a chip after its first use; add, rename or remove them in Settings → CHIPS.',
+        what: `Labels used before. On ${g.add.glyph} LOG, type a few letters: the ones with a word starting that way show, most recent first; tap one to use it, or log what you typed as a new one. ${g.collapsed.glyph} ALL LABELS shows them all. Add, rename or remove them in Settings → CHIPS.`,
       },
     ],
   },

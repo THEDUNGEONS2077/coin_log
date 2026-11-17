@@ -246,11 +246,22 @@ async function moneyFlows(page) {
   );
 
   // F2 again: the typed label is a chip now; on debit there are no budget lines, so it's all spare (900 → 800).
+  // D43: the labels start collapsed; typing finds the one used before.
   await tap(page, 'Log a transaction');
-  check((await text(page)).includes('RESTAURANT'), 'a typed label became a chip');
+  let form2 = await text(page);
+  check(form2.includes('ALL LABELS (1)') && !form2.includes('RESTAURANT'), 'labels used before start collapsed');
   await page.getByRole('radio', { name: 'DEBIT', exact: true }).click();
   await type(page, 'AMOUNT', '100');
+  await type(page, 'Label', 'res');
+  form2 = await text(page);
+  check(form2.includes('RESTAURANT') && form2.includes('NEW LABEL'), 'typing finds a label used before (and says the typed one is new)');
+  await page.screenshot({ path: join(shots, 'label-search.png'), fullPage: true });
   await page.getByRole('radio', { name: 'Restaurant', exact: true }).click();
+  await page.waitForTimeout(300);
+  check(
+    (await page.getByLabel('Label', { exact: true }).first().inputValue()) === 'Restaurant' && !(await text(page)).includes('NEW LABEL'),
+    'tapping it fills in the saved label',
+  );
   await tap(page, 'Log it');
   check((await text(page)).includes('R800'), 'a debit transaction comes out of spare debit');
 
@@ -359,7 +370,8 @@ async function chipFlows(page) {
   check(settings.includes('PETROL') && !settings.includes('FUEL'), 'a chip can be renamed');
   await tap(page, 'Close settings');
   await tap(page, 'Log a transaction');
-  check((await text(page)).includes('PETROL'), 'the chip is offered when logging');
+  await tap(page, 'All labels, 2');
+  check((await text(page)).includes('PETROL'), 'ALL LABELS opens every chip, the renamed one included');
   await tap(page, 'Cancel');
 }
 
